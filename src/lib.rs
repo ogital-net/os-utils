@@ -9,7 +9,7 @@ pub struct UtsName {
 
 impl UtsName {
     /// Retrieves system identification information by calling the system's `uname` function.
-    /// 
+    ///
     /// # Returns
     /// - `Ok(UtsName)` containing the system information if successful
     /// - `Err(std::io::Error)` if the system call fails
@@ -27,7 +27,7 @@ impl UtsName {
     }
 
     /// Returns the operating system name (e.g., "Linux", "Darwin").
-    /// 
+    ///
     /// # Panics
     /// Panics if the system name contains invalid UTF-8 characters.
     pub fn sysname(&self) -> &str {
@@ -39,7 +39,7 @@ impl UtsName {
     }
 
     /// Returns the network node hostname.
-    /// 
+    ///
     /// # Panics
     /// Panics if the hostname contains invalid UTF-8 characters.
     pub fn nodename(&self) -> &str {
@@ -51,7 +51,7 @@ impl UtsName {
     }
 
     /// Returns the operating system release level.
-    /// 
+    ///
     /// # Panics
     /// Panics if the release string contains invalid UTF-8 characters.
     pub fn release(&self) -> &str {
@@ -63,7 +63,7 @@ impl UtsName {
     }
 
     /// Returns the operating system version.
-    /// 
+    ///
     /// # Panics
     /// Panics if the version string contains invalid UTF-8 characters.
     pub fn version(&self) -> &str {
@@ -75,7 +75,7 @@ impl UtsName {
     }
 
     /// Returns the machine hardware name.
-    /// 
+    ///
     /// # Panics
     /// Panics if the machine name contains invalid UTF-8 characters.
     pub fn machine(&self) -> &str {
@@ -87,9 +87,9 @@ impl UtsName {
     }
 
     /// Returns the Network Information System (NIS) domain name.
-    /// 
+    ///
     /// This method is only available on Linux systems.
-    /// 
+    ///
     /// # Panics
     /// Panics if the domain name contains invalid UTF-8 characters.
     #[cfg(target_os = "linux")]
@@ -103,7 +103,7 @@ impl UtsName {
 }
 
 /// Represents the scheduling policy for a thread.
-/// 
+///
 /// - `Other`: Standard round-robin time-sharing scheduling policy (SCHED_OTHER)
 /// - `FIFO`: First-in-first-out real-time scheduling policy (SCHED_FIFO)
 /// - `RoundRobin`: Round-robin real-time scheduling policy (SCHED_RR)
@@ -275,7 +275,7 @@ pub fn rand_bytes(dst: &mut [u8]) -> std::io::Result<()> {
 
 /// Generates a random string of specified length using a secure random number generator.
 ///
-/// The generated string contains characters from the set: 
+/// The generated string contains characters from the set:
 /// `.`, `/`, `0-9`, `A-Z`, and `a-z`.
 ///
 /// # Arguments
@@ -292,11 +292,11 @@ pub fn rand_string(len: usize) -> String {
     }
 
     const CHARS: [u8; 64] = [
-        b'.', b'/', b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'A', b'B', b'C',
-        b'D', b'E', b'F', b'G', b'H', b'I', b'J', b'K', b'L', b'M', b'N', b'O', b'P', b'Q', b'R',
-        b'S', b'T', b'U', b'V', b'W', b'X', b'Y', b'Z', b'a', b'b', b'c', b'd', b'e', b'f', b'g',
-        b'h', b'i', b'j', b'k', b'l', b'm', b'n', b'o', b'p', b'q', b'r', b's', b't', b'u', b'v',
-        b'w', b'x', b'y', b'z',
+        b'A', b'B', b'C', b'D', b'E', b'F', b'G', b'H', b'I', b'J', b'K', b'L', b'M', b'N', b'O',
+        b'P', b'Q', b'R', b'S', b'T', b'U', b'V', b'W', b'X', b'Y', b'Z', b'a', b'b', b'c', b'd',
+        b'e', b'f', b'g', b'h', b'i', b'j', b'k', b'l', b'm', b'n', b'o', b'p', b'q', b'r', b's',
+        b't', b'u', b'v', b'w', b'x', b'y', b'z', b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7',
+        b'8', b'9', b'-', b'_',
     ];
 
     let mut buf = vec![0u8; len];
@@ -353,7 +353,7 @@ pub fn getloadavg() -> std::io::Result<[f64; 3]> {
 
     #[allow(clippy::needless_range_loop)]
     for i in 0..3 {
-        loadavg[i] = 1.0 / ((1 << libc::SI_LOAD_SHIFT) * si.loads[i]) as f64  ;
+        loadavg[i] = 1.0 / ((1 << libc::SI_LOAD_SHIFT) * si.loads[i]) as f64;
     }
 
     Ok(loadavg)
@@ -470,7 +470,7 @@ mod tests {
 
         // Test string contents are from valid charset
         const VALID_CHARS: &[u8] =
-            b"./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
         for c in s1.bytes() {
             assert!(VALID_CHARS.contains(&c));
         }

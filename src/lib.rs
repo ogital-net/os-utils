@@ -276,7 +276,7 @@ pub fn rand_bytes(dst: &mut [u8]) -> std::io::Result<()> {
 /// Generates a random string of specified length using a secure random number generator.
 ///
 /// The generated string contains characters from the set:
-/// `.`, `/`, `0-9`, `A-Z`, and `a-z`.
+/// `-`, `_`, `0-9`, `A-Z`, and `a-z`.
 ///
 /// # Arguments
 /// * `len` - The length of the random string to generate

@@ -16,7 +16,7 @@ uint64_t uptime_proc_c(pid_t pid)
     struct kinfo_proc proc_info;
     size_t size = sizeof(proc_info);
     int32_t mib[4];
-    struct timeval current_time;
+    struct timespec current_time;
     uint64_t currrent_nanos, proc_nanos;
 
     mib[0] = CTL_KERN;
@@ -29,8 +29,8 @@ uint64_t uptime_proc_c(pid_t pid)
         return 0;
     }
 
-    gettimeofday(&current_time, NULL);
-    currrent_nanos = ((uint64_t)current_time.tv_sec * 1000000 + current_time.tv_usec) * 1000;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &current_time);
+    currrent_nanos = (uint64_t)current_time.tv_sec * 1000000000 + current_time.tv_nsec;
     proc_nanos = ((uint64_t)proc_info.kp_proc.p_starttime.tv_sec * 1000000 + proc_info.kp_proc.p_starttime.tv_usec) * 1000;
 
     return currrent_nanos - proc_nanos;
@@ -59,7 +59,7 @@ uint64_t uptime_proc_c(pid_t pid)
 {
     char path[PATH_MAX];
     struct stat sb;
-    struct timeval current_time;
+    struct timespec current_time;
     uint64_t currrent_nanos, proc_nanos;
 
     snprintf(path, sizeof(path), "/proc/%d", pid);
@@ -68,8 +68,8 @@ uint64_t uptime_proc_c(pid_t pid)
     {
         return 0;
     }
-    gettimeofday(&current_time, NULL);
-    currrent_nanos = ((uint64_t)current_time.tv_sec * 1000000 + current_time.tv_usec) * 1000;
+    clock_gettime(CLOCK_MONOTONIC, &current_time);
+    currrent_nanos = (uint64_t)current_time.tv_sec * 1000000000 + current_time.tv_nsec;
     proc_nanos = (uint64_t)sb.st_ctim.tv_sec * 1000000000 + sb.st_ctim.tv_nsec;
 
     return currrent_nanos - proc_nanos;

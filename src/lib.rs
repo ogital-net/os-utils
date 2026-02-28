@@ -15,6 +15,8 @@ impl UtsName {
     /// - `Err(std::io::Error)` if the system call fails
     pub fn uname() -> std::io::Result<Self> {
         let (res, utsname) = unsafe {
+            // SAFETY: utsname is properly initialized by the system call if it returns 0.
+            // We initialize the struct with MaybeUninit and only call assume_init after the system call.
             let mut utsname = MaybeUninit::<libc::utsname>::uninit();
             let res = libc::uname(utsname.as_mut_ptr());
             (res, utsname.assume_init())
@@ -32,6 +34,8 @@ impl UtsName {
     /// Panics if the system name contains invalid UTF-8 characters.
     pub fn sysname(&self) -> &str {
         unsafe {
+            // SAFETY: The sysname field in libc::utsname is guaranteed to contain a valid
+            // null-terminated C string that was initialized by the uname system call.
             CStr::from_ptr(self.inner.sysname.as_ptr())
                 .to_str()
                 .unwrap()
@@ -44,6 +48,8 @@ impl UtsName {
     /// Panics if the hostname contains invalid UTF-8 characters.
     pub fn nodename(&self) -> &str {
         unsafe {
+            // SAFETY: The nodename field in libc::utsname is guaranteed to contain a valid
+            // null-terminated C string that was initialized by the uname system call.
             CStr::from_ptr(self.inner.nodename.as_ptr())
                 .to_str()
                 .unwrap()
@@ -56,6 +62,8 @@ impl UtsName {
     /// Panics if the release string contains invalid UTF-8 characters.
     pub fn release(&self) -> &str {
         unsafe {
+            // SAFETY: The release field in libc::utsname is guaranteed to contain a valid
+            // null-terminated C string that was initialized by the uname system call.
             CStr::from_ptr(self.inner.release.as_ptr())
                 .to_str()
                 .unwrap()
@@ -68,6 +76,8 @@ impl UtsName {
     /// Panics if the version string contains invalid UTF-8 characters.
     pub fn version(&self) -> &str {
         unsafe {
+            // SAFETY: The version field in libc::utsname is guaranteed to contain a valid
+            // null-terminated C string that was initialized by the uname system call.
             CStr::from_ptr(self.inner.version.as_ptr())
                 .to_str()
                 .unwrap()
@@ -80,6 +90,8 @@ impl UtsName {
     /// Panics if the machine name contains invalid UTF-8 characters.
     pub fn machine(&self) -> &str {
         unsafe {
+            // SAFETY: The machine field in libc::utsname is guaranteed to contain a valid
+            // null-terminated C string that was initialized by the uname system call.
             CStr::from_ptr(self.inner.machine.as_ptr())
                 .to_str()
                 .unwrap()
@@ -95,6 +107,8 @@ impl UtsName {
     #[cfg(target_os = "linux")]
     pub fn domainname(&self) -> &str {
         unsafe {
+            // SAFETY: The domainname field in libc::utsname is guaranteed to contain a valid
+            // null-terminated C string that was initialized by the uname system call.
             CStr::from_ptr(self.inner.domainname.as_ptr())
                 .to_str()
                 .unwrap()
@@ -140,8 +154,13 @@ impl From<SchedPolicy> for libc::c_int {
 /// # Notes
 /// Setting real-time scheduling policies (FIFO, RoundRobin) typically requires root privileges.
 pub fn thread_setscheduler(policy: SchedPolicy, sched_priority: i32) -> std::io::Result<()> {
+    // SAFETY: MaybeUninit::zeroed() initializes all bytes to zero, which is a valid
+    // initialization for libc::sched_param.
     let mut params = unsafe { MaybeUninit::<libc::sched_param>::zeroed().assume_init() };
     params.sched_priority = sched_priority;
+    // SAFETY: pthread_setschedparam is a valid POSIX function that operates on the current thread.
+    // The parameters are valid: pthread_self() returns the current thread, policy is converted from
+    // our enum, and params is properly initialized.
     let res = unsafe { libc::pthread_setschedparam(libc::pthread_self(), policy.into(), &params) };
     if res == 0 {
         return Ok(());
@@ -162,6 +181,9 @@ pub fn thread_setscheduler(policy: SchedPolicy, sched_priority: i32) -> std::io:
 /// # Notes
 /// Setting a negative nice value (higher priority) typically requires root privileges.
 pub fn process_setpriority(prio: i32) -> std::io::Result<()> {
+    // SAFETY: setpriority is a valid POSIX function. The arguments are safe:
+    // PRIO_PROCESS is a valid constant, getpid() returns the current process ID,
+    // and prio is a valid i32 that will be converted appropriately.
     let res = unsafe { libc::setpriority(libc::PRIO_PROCESS, libc::getpid() as libc::id_t, prio) };
     if res == 0 {
         return Ok(());
@@ -234,6 +256,8 @@ pub fn rand_bytes(dst: &mut [u8]) -> std::io::Result<()> {
     }
 
     unsafe {
+        // SAFETY: getrandom is a valid system call. The buffer pointer is valid and properly aligned,
+        // the length matches the slice size, and we check the return value to ensure safe usage.
         let res = libc::getrandom(dst.as_mut_ptr() as *mut libc::c_void, need, 0);
         if res < 0 {
             return Err(std::io::Error::last_os_error());
@@ -264,6 +288,8 @@ pub fn rand_bytes(dst: &mut [u8]) -> std::io::Result<()> {
         return Ok(());
     }
 
+    // SAFETY: CCRandomGenerateBytes is a valid macOS function. The buffer pointer is valid
+    // and properly aligned, and the length matches the slice size.
     if unsafe { libc::CCRandomGenerateBytes(dst.as_mut_ptr() as *mut libc::c_void, need) } != 0 {
         Err(std::io::Error::other(format!(
             "Unable to generate {need} random bytes"
@@ -299,14 +325,74 @@ pub fn rand_string(len: usize) -> String {
         b'8', b'9', b'-', b'_',
     ];
 
-    let mut buf = vec![0u8; len];
-    rand_bytes(&mut buf).unwrap();
+    let mut buf: Vec<u8> = Vec::with_capacity(len);
+    rand_bytes(unsafe {
+        // SAFETY: We're transmuting the spare capacity of the vector to a mutable slice of u8.
+        // spare_capacity_mut() returns uninitialized space, and we immediately fill it with
+        // rand_bytes, which initializes it before we use it.
+        std::mem::transmute::<&mut [std::mem::MaybeUninit<u8>], &mut [u8]>(buf.spare_capacity_mut())
+    })
+    .unwrap();
+    // SAFETY: We just initialized `len` bytes in the buffer via rand_bytes call above.
+    unsafe { buf.set_len(len) };
 
     for b in buf.iter_mut() {
         *b = CHARS[(*b >> 2) as usize];
     }
     // SAFETY: the charset provided is valid UTF-8
     unsafe { String::from_utf8_unchecked(buf) }
+}
+
+/// Generates a cryptographically secure random 32-bit unsigned integer.
+///
+/// # Returns
+/// A `u32` containing 4 random bytes from the system's secure random number generator.
+///
+/// # Panics
+/// Panics if random byte generation fails.
+///
+/// # Example
+/// ```ignore
+/// let random_num = rand_u32();
+/// println!("Random u32: {}", random_num);
+/// ```
+pub fn rand_u32() -> u32 {
+    let mut buf: [MaybeUninit<u8>; 4] = [MaybeUninit::uninit(); 4];
+    rand_bytes(unsafe {
+        // SAFETY: We're transmuting the uninitialized buffer to a mutable slice of u8.
+        // Since rand_bytes will immediately initialize it, this is safe.
+        std::mem::transmute::<&mut [std::mem::MaybeUninit<u8>], &mut [u8]>(&mut buf[..])
+    })
+    .unwrap();
+    // SAFETY: The buffer has been fully initialized by rand_bytes above, so transmuting
+    // the 4 initialized bytes to u32 is safe.
+    unsafe { std::mem::transmute(buf) }
+}
+
+/// Generates a cryptographically secure random 64-bit unsigned integer.
+///
+/// # Returns
+/// A `u64` containing 8 random bytes from the system's secure random number generator.
+///
+/// # Panics
+/// Panics if random byte generation fails.
+///
+/// # Example
+/// ```ignore
+/// let random_num = rand_u64();
+/// println!("Random u64: {}", random_num);
+/// ```
+pub fn rand_u64() -> u64 {
+    let mut buf: [MaybeUninit<u8>; 8] = [MaybeUninit::uninit(); 8];
+    rand_bytes(unsafe {
+        // SAFETY: We're transmuting the uninitialized buffer to a mutable slice of u8.
+        // Since rand_bytes will immediately initialize it, this is safe.
+        std::mem::transmute::<&mut [std::mem::MaybeUninit<u8>], &mut [u8]>(&mut buf[..])
+    })
+    .unwrap();
+    // SAFETY: The buffer has been fully initialized by rand_bytes above, so transmuting
+    // the 8 initialized bytes to u64 is safe.
+    unsafe { std::mem::transmute(buf) }
 }
 
 /// Returns the system load averages for the past 1, 5, and 15 minutes.
@@ -322,6 +408,8 @@ pub fn rand_string(len: usize) -> String {
 #[cfg(target_os = "macos")]
 pub fn getloadavg() -> std::io::Result<[f64; 3]> {
     let mut loadavg = [0f64, 0f64, 0f64];
+    // SAFETY: getloadavg is a valid macOS function. The array pointer is valid and
+    // properly aligned, and the length is correct (3 elements).
     let res = unsafe { libc::getloadavg(loadavg.as_mut_ptr(), loadavg.len() as libc::c_int) };
     if res != loadavg.len() as i32 {
         return Err(std::io::Error::other("Unable to retrieve load average."));
@@ -344,6 +432,8 @@ pub fn getloadavg() -> std::io::Result<[f64; 3]> {
     let mut loadavg = [0f64, 0f64, 0f64];
 
     let si = unsafe {
+        // SAFETY: sysinfo is a valid Linux system call. We initialize the structure with
+        // MaybeUninit and only call assume_init after confirming the system call succeeded.
         let mut si = MaybeUninit::<libc::sysinfo>::uninit();
         if libc::sysinfo(si.as_mut_ptr()) != 0 {
             return Err(std::io::Error::last_os_error());
@@ -482,5 +572,21 @@ mod tests {
         assert!(avg[0] > 0.0);
         assert!(avg[1] > 0.0);
         assert!(avg[2] > 0.0);
+    }
+
+    #[test]
+    fn test_rand_u32() {
+        // Test that two consecutive u32 values are different
+        let v1 = rand_u32();
+        let v2 = rand_u32();
+        assert_ne!(v1, v2);
+    }
+
+    #[test]
+    fn test_rand_u64() {
+        // Test that two consecutive u64 values are different
+        let v1 = rand_u64();
+        let v2 = rand_u64();
+        assert_ne!(v1, v2);
     }
 }

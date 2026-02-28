@@ -206,6 +206,7 @@ pub fn gethostname() -> std::io::Result<String> {
 unsafe extern "C" {
     fn uptime_sys_c() -> u64;
     fn uptime_proc_c(id: i32) -> u64;
+    fn rss_self_c() -> usize;
 }
 
 /// Returns the system uptime (time since boot).
@@ -235,6 +236,21 @@ pub fn uptime_proc(id: u32) -> Duration {
 /// A `Duration` representing how long the container has been running.
 pub fn uptime_container() -> Duration {
     uptime_proc(1)
+}
+
+/// Returns the resident set size (RSS) of the current process.
+///
+/// The resident set size is the portion of a process's memory that is held in main memory (RAM).
+/// This is useful for monitoring memory usage of the running process.
+///
+/// # Returns
+/// The resident set size in bytes.
+///
+/// # Platform-specific
+/// - **macOS/Darwin**: Uses `task_info` with `TASK_BASIC_INFO` to get memory information.
+/// - **Linux**: Reads from `/proc/self/statm` and converts pages to bytes.
+pub fn rss_self() -> usize {
+    unsafe { rss_self_c() }
 }
 
 /// Generates cryptographically secure random bytes using the Linux `getrandom` system call.
@@ -572,6 +588,13 @@ mod tests {
         assert!(avg[0] > 0.0);
         assert!(avg[1] > 0.0);
         assert!(avg[2] > 0.0);
+    }
+
+    #[test]
+    fn test_rss_self() {
+        let rss = rss_self();
+        dbg!(rss);
+        assert!(rss > 0, "RSS should be greater than 0");
     }
 
     #[test]

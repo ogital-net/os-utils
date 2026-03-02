@@ -1,4 +1,4 @@
-use std::{ffi::CStr, mem::MaybeUninit, time::Duration};
+use std::{ffi::CStr, ffi::CString, mem::MaybeUninit, path::Path, time::Duration};
 
 /// Represents system identification information, wrapping the `libc::utsname` structure.
 /// This struct provides a safe interface to access system information such as operating system name,
@@ -785,6 +785,47 @@ pub fn getloadavg() -> std::io::Result<[f64; 3]> {
     Ok(loadavg)
 }
 
+/// Returns disk usage information for a given path.
+///
+/// # Arguments
+/// * `path` - The filesystem path to query
+///
+/// # Returns
+/// * `Ok((used_bytes, total_bytes))` - A tuple containing the used bytes and total available bytes
+/// * `Err(std::io::Error)` if the system call fails or path is invalid
+///
+/// # Example
+/// ```ignore
+/// let (used, total) = disk_usage("/").unwrap();
+/// println!("Disk usage: {} / {} bytes ({:.1}% used)",
+///          used, total, (used as f64 / total as f64) * 100.0);
+/// ```
+pub fn disk_usage<P: AsRef<Path>>(path: P) -> std::io::Result<(u64, u64)> {
+    let path_cstr = CString::new(
+        path.as_ref()
+            .to_str()
+            .ok_or_else(|| std::io::Error::other("Invalid UTF-8 in path"))?,
+    )
+    .map_err(|_| std::io::Error::other("Path contains null byte"))?;
+
+    let stat = unsafe {
+        // SAFETY: statvfs is a valid POSIX system call. We initialize the structure with
+        // MaybeUninit and only call assume_init after confirming the system call succeeded.
+        let mut stat = MaybeUninit::<libc::statvfs>::uninit();
+        if libc::statvfs(path_cstr.as_ptr(), stat.as_mut_ptr()) != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        stat.assume_init()
+    };
+
+    // Total bytes = total blocks * fragment size
+    let total_bytes = stat.f_blocks as u64 * stat.f_frsize as u64;
+    // Used bytes = (total blocks - free blocks) * fragment size
+    let used_bytes = (stat.f_blocks - stat.f_bfree) as u64 * stat.f_frsize as u64;
+
+    Ok((used_bytes, total_bytes))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1024,5 +1065,31 @@ mod tests {
         let v1 = rand_u64();
         let v2 = rand_u64();
         assert_ne!(v1, v2);
+    }
+
+    #[test]
+    fn test_disk_usage() {
+        // Test disk usage for root directory
+        let result = disk_usage("/");
+        assert!(result.is_ok(), "Failed to get disk usage for /");
+
+        let (used, total) = result.unwrap();
+        assert!(total > 0, "Total bytes should be greater than 0");
+        assert!(used > 0, "Used bytes should be greater than 0");
+        assert!(
+            used <= total,
+            "Used bytes should be less than or equal to total bytes"
+        );
+
+        // Test with current directory
+        let result = disk_usage(".");
+        assert!(
+            result.is_ok(),
+            "Failed to get disk usage for current directory"
+        );
+
+        // Test with invalid path
+        let result = disk_usage("/nonexistent/path/that/does/not/exist");
+        assert!(result.is_err(), "Should fail for non-existent path");
     }
 }

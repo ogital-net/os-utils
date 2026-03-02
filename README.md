@@ -44,6 +44,20 @@ fn main() -> std::io::Result<()> {
 }
 ```
 
+### Get uname -a Output
+
+```rust
+use os_utils::uname;
+
+fn main() -> std::io::Result<()> {
+    let info = uname()?;
+    println!("{}", info);
+    // macOS: "Darwin hostname 23.6.0 Darwin Kernel Version... x86_64"
+    // Linux: "Linux hostname 5.15.0-1 #1 SMP... x86_64 x86_64 x86_64 GNU/Linux"
+    Ok(())
+}
+```
+
 ### Thread Scheduling
 
 ```rust
@@ -116,6 +130,15 @@ Some features are platform-specific:
 - Random number generation uses different system calls on each platform
   - Linux: `getrandom`
   - macOS: Common Crypto framework
+
+### SIMD Optimizations
+
+The `rand_string` function includes SIMD optimizations for improved performance:
+- **x86_64**: Uses SSSE3 instructions (`_mm_shuffle_epi8`) when available
+- **AArch64/ARM64**: Uses NEON instructions (`vqtbl1q_u8`) when available
+- **Other platforms**: Falls back to scalar implementation
+
+The SIMD implementation provides 2-3x speedup for charset lookups on strings ≥32 bytes. See [SIMD_OPTIMIZATION.md](SIMD_OPTIMIZATION.md) for detailed performance analysis.
 
 ## Safety
 

@@ -29,7 +29,7 @@ fn main() {
             stderr
                 .write_all(b"[Debug] Read ")
                 .expect("Failed to write to stderr");
-            let count_str = format!("{}", n);
+            let count_str = format!("{n}");
             stderr
                 .write_all(count_str.as_bytes())
                 .expect("Failed to write to stderr");
@@ -42,7 +42,7 @@ fn main() {
             stderr
                 .write_all(b"Error reading from stdin: ")
                 .expect("Failed to write to stderr");
-            let err_msg = format!("{}\n", e);
+            let err_msg = format!("{e}\n");
             stderr
                 .write_all(err_msg.as_bytes())
                 .expect("Failed to write to stderr");

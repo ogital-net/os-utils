@@ -1,5 +1,6 @@
 use std::{
     ffi::{CStr, CString, OsStr},
+    fmt::Write as _,
     io::{IoSlice, IoSliceMut},
     mem::MaybeUninit,
     os::{fd::AsRawFd, unix::ffi::OsStrExt},
@@ -186,46 +187,26 @@ impl UtsName {
 pub fn uname() -> std::io::Result<String> {
     let info = UtsName::new()?;
 
-    #[cfg(target_os = "macos")]
-    {
-        Ok(format!(
-            "{} {} {} {} {}",
-            info.sysname(),
-            info.nodename(),
-            info.release(),
-            info.version(),
-            info.machine()
-        ))
-    }
+    let mut buf = String::with_capacity(128);
+    write!(
+        buf,
+        "{} {} {} {} {}",
+        info.sysname(),
+        info.nodename(),
+        info.release(),
+        info.version(),
+        info.machine()
+    )
+    .expect("write failed");
 
     #[cfg(target_os = "linux")]
     {
-        // Linux uname -a format includes additional fields and "GNU/Linux" at the end
-        Ok(format!(
-            "{} {} {} {} {} {} {} {}",
-            info.sysname(),
-            info.nodename(),
-            info.release(),
-            info.version(),
-            info.machine(),
-            info.machine(), // processor (same as machine on most systems)
-            info.machine(), // hardware platform (same as machine)
-            "GNU/Linux"
-        ))
+        // Linux uname -a format includes "GNU/Linux" at the end
+        const HOST_OPERATING_SYSTEM: &str = "GNU/Linux";
+        write!(buf, " {HOST_OPERATING_SYSTEM}").expect("write failed");
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    {
-        // Generic format for other platforms
-        Ok(format!(
-            "{} {} {} {} {}",
-            info.sysname(),
-            info.nodename(),
-            info.release(),
-            info.version(),
-            info.machine()
-        ))
-    }
+    Ok(buf)
 }
 
 /// Represents the scheduling policy for a thread.
@@ -454,7 +435,7 @@ pub fn rand_string(len: usize) -> String {
     // Use SIMD optimization if available - round up to 16-byte boundary
     #[cfg(target_arch = "x86_64")]
     {
-        if len > 16 && is_x86_feature_detected!("ssse3") {
+        if is_x86_feature_detected!("ssse3") {
             // Round up to nearest 16-byte boundary for optimal SIMD processing
             let simd_len = (len + 15) & !15;
             let mut buf: Vec<u8> = Vec::with_capacity(simd_len);
@@ -484,7 +465,7 @@ pub fn rand_string(len: usize) -> String {
     // Use NEON optimization on ARM if available
     #[cfg(target_arch = "aarch64")]
     {
-        if len > 16 && std::arch::is_aarch64_feature_detected!("neon") {
+        if std::arch::is_aarch64_feature_detected!("neon") {
             // Round up to nearest 16-byte boundary for optimal SIMD processing
             let simd_len = (len + 15) & !15;
             let mut buf: Vec<u8> = Vec::with_capacity(simd_len);
@@ -1141,11 +1122,11 @@ mod tests {
         // Get output from our Rust function
         let rust_output = uname().expect("Failed to get uname output");
 
-        // Execute system's uname -a command
+        // Execute system's uname command
         let system_output = Command::new("uname")
-            .arg("-a")
+            .args(["-s", "-n", "-r", "-v", "-m", "-o"])
             .output()
-            .expect("Failed to execute uname -a");
+            .expect("Failed to execute uname");
 
         let system_output_str = String::from_utf8_lossy(&system_output.stdout)
             .trim()
@@ -1154,11 +1135,10 @@ mod tests {
         // Verify our function output matches system command output
         assert_eq!(
             rust_output, system_output_str,
-            "Rust uname() output does not match system uname -a output.\nRust:   '{}'\nSystem: '{}'",
-            rust_output, system_output_str
+            "Rust uname() output does not match system uname output.\nRust:   '{rust_output}'\nSystem: '{system_output_str}'"
         );
 
-        println!("uname output verified: {}", rust_output);
+        println!("uname output verified: {rust_output}");
     }
 
     #[test]
@@ -1287,8 +1267,7 @@ mod tests {
             if is_x86_feature_detected!("ssse3") {
                 assert_eq!(
                     scalar_result, simd_result,
-                    "SIMD and scalar results differ for size {}",
-                    size
+                    "SIMD and scalar results differ for size {size}"
                 );
             }
 

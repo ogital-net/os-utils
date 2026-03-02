@@ -12,7 +12,7 @@ fn main() {
     if stdin.isatty() {
         match stdin.ttyname() {
             Ok(name) => println!("Connected to terminal: {}", name.display()),
-            Err(e) => println!("Error getting tty name: {}", e),
+            Err(e) => println!("Error getting tty name: {e}"),
         }
     } else {
         println!("Not a terminal (redirected or piped)");
@@ -23,7 +23,7 @@ fn main() {
     if stdout.isatty() {
         match stdout.ttyname() {
             Ok(name) => println!("Connected to terminal: {}", name.display()),
-            Err(e) => println!("Error getting tty name: {}", e),
+            Err(e) => println!("Error getting tty name: {e}"),
         }
     } else {
         println!("Not a terminal (redirected or piped)");
@@ -34,7 +34,7 @@ fn main() {
     if stderr.isatty() {
         match stderr.ttyname() {
             Ok(name) => println!("Connected to terminal: {}", name.display()),
-            Err(e) => println!("Error getting tty name: {}", e),
+            Err(e) => println!("Error getting tty name: {e}"),
         }
     } else {
         println!("Not a terminal (redirected or piped)");

@@ -9,12 +9,12 @@ fn main() {
 
     for &len in &lengths {
         let s = rand_string(len);
-        println!("Length {:3}: {}", len, s);
+        println!("Length {len:3}: {s}");
 
         // Verify charset
         let valid_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
         for ch in s.chars() {
-            assert!(valid_chars.contains(ch), "Invalid character: {}", ch);
+            assert!(valid_chars.contains(ch), "Invalid character: {ch}");
         }
     }
 

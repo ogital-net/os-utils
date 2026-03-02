@@ -6,7 +6,7 @@ fn main() -> std::io::Result<()> {
     // Get formatted uname -a style output
     println!("uname -a format:");
     let uname_output = uname()?;
-    println!("{}\n", uname_output);
+    println!("{uname_output}\n");
 
     // Get individual fields
     println!("Individual fields:");

@@ -1,4 +1,53 @@
-use std::{ffi::CStr, ffi::CString, mem::MaybeUninit, path::Path, time::Duration};
+use std::{
+    ffi::{CStr, CString},
+    io::{IoSlice, IoSliceMut},
+    mem::MaybeUninit,
+    path::Path,
+    time::Duration,
+};
+
+// borrowed from rust std lib internals
+#[cfg(any(
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_vendor = "apple",
+    target_os = "cygwin",
+))]
+const fn max_iov() -> usize {
+    libc::IOV_MAX as usize
+}
+
+#[cfg(any(
+    target_os = "android",
+    target_os = "emscripten",
+    target_os = "linux",
+    target_os = "nto",
+))]
+const fn max_iov() -> usize {
+    libc::UIO_MAXIOV as usize
+}
+
+#[cfg(not(any(
+    target_os = "android",
+    target_os = "dragonfly",
+    target_os = "emscripten",
+    target_os = "espidf",
+    target_os = "freebsd",
+    target_os = "linux",
+    target_os = "netbsd",
+    target_os = "nuttx",
+    target_os = "nto",
+    target_os = "openbsd",
+    target_os = "horizon",
+    target_os = "vita",
+    target_vendor = "apple",
+    target_os = "cygwin",
+)))]
+const fn max_iov() -> usize {
+    16 // The minimum value required by POSIX.
+}
 
 /// Represents system identification information, wrapping the `libc::utsname` structure.
 /// This struct provides a safe interface to access system information such as operating system name,
@@ -824,6 +873,282 @@ pub fn disk_usage<P: AsRef<Path>>(path: P) -> std::io::Result<(u64, u64)> {
     let used_bytes = (stat.f_blocks - stat.f_bfree) as u64 * stat.f_frsize as u64;
 
     Ok((used_bytes, total_bytes))
+}
+
+/// Represents standard input (file descriptor 0).
+///
+/// This struct provides a low-level interface to stdin using direct libc syscalls.
+pub struct StdIn;
+
+impl StdIn {
+    /// Creates a new StdIn instance.
+    pub fn new() -> Self {
+        StdIn
+    }
+
+    /// Returns whether stdin is connected to a terminal.
+    ///
+    /// # Returns
+    /// `true` if stdin is a terminal, `false` otherwise.
+    pub fn isatty(&self) -> bool {
+        unsafe {
+            // SAFETY: isatty is always safe to call with any file descriptor.
+            // It returns 1 if the fd refers to a terminal, 0 otherwise.
+            libc::isatty(0) == 1
+        }
+    }
+
+    /// Returns the name of the terminal device connected to stdin.
+    ///
+    /// # Returns
+    /// * `Ok(String)` containing the terminal device name (e.g., "/dev/ttys001")
+    /// * `Err(std::io::Error)` if stdin is not connected to a terminal or an error occurs
+    pub fn ttyname(&self) -> std::io::Result<String> {
+        let mut buf = [0u8; 256];
+        let result = unsafe {
+            // SAFETY: We're calling ttyname_r with a valid file descriptor (0)
+            // and a properly allocated buffer with correct size.
+            libc::ttyname_r(0, buf.as_mut_ptr() as *mut libc::c_char, buf.len())
+        };
+
+        if result != 0 {
+            return Err(std::io::Error::from_raw_os_error(result));
+        }
+
+        let name = unsafe {
+            // SAFETY: ttyname_r guarantees a null-terminated string on success.
+            CStr::from_ptr(buf.as_ptr() as *const libc::c_char)
+        }
+        .to_str()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+        Ok(name.to_string())
+    }
+}
+
+impl std::io::Read for StdIn {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let result = unsafe {
+            // SAFETY: We're calling libc::read with a valid file descriptor (0 for stdin)
+            // and a properly allocated buffer with correct length.
+            libc::read(0, buf.as_mut_ptr() as *mut libc::c_void, buf.len())
+        };
+
+        if result < 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(result as usize)
+        }
+    }
+
+    fn read_vectored(&mut self, bufs: &mut [IoSliceMut<'_>]) -> std::io::Result<usize> {
+        let result = unsafe {
+            libc::readv(
+                0,
+                bufs.as_mut_ptr() as *mut libc::iovec as *const libc::iovec,
+                std::cmp::min(bufs.len(), max_iov()) as libc::c_int,
+            )
+        };
+        if result < 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(result as usize)
+        }
+    }
+}
+
+impl Default for StdIn {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Represents standard output (file descriptor 1).
+///
+/// This struct provides a low-level interface to stdout using direct libc syscalls.
+pub struct StdOut;
+
+impl StdOut {
+    /// Creates a new StdOut instance.
+    pub fn new() -> Self {
+        StdOut
+    }
+
+    /// Returns whether stdout is connected to a terminal.
+    ///
+    /// # Returns
+    /// `true` if stdout is a terminal, `false` otherwise.
+    pub fn isatty(&self) -> bool {
+        unsafe {
+            // SAFETY: isatty is always safe to call with any file descriptor.
+            // It returns 1 if the fd refers to a terminal, 0 otherwise.
+            libc::isatty(1) == 1
+        }
+    }
+
+    /// Returns the name of the terminal device connected to stdout.
+    ///
+    /// # Returns
+    /// * `Ok(String)` containing the terminal device name (e.g., "/dev/ttys001")
+    /// * `Err(std::io::Error)` if stdout is not connected to a terminal or an error occurs
+    pub fn ttyname(&self) -> std::io::Result<String> {
+        let mut buf = [0u8; 256];
+        let result = unsafe {
+            // SAFETY: We're calling ttyname_r with a valid file descriptor (1)
+            // and a properly allocated buffer with correct size.
+            libc::ttyname_r(1, buf.as_mut_ptr() as *mut libc::c_char, buf.len())
+        };
+
+        if result != 0 {
+            return Err(std::io::Error::from_raw_os_error(result));
+        }
+
+        let name = unsafe {
+            // SAFETY: ttyname_r guarantees a null-terminated string on success.
+            CStr::from_ptr(buf.as_ptr() as *const libc::c_char)
+        }
+        .to_str()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+        Ok(name.to_string())
+    }
+}
+
+impl std::io::Write for StdOut {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let result = unsafe {
+            // SAFETY: We're calling libc::write with a valid file descriptor (1 for stdout)
+            // and a properly allocated buffer with correct length.
+            libc::write(1, buf.as_ptr() as *const libc::c_void, buf.len())
+        };
+
+        if result < 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(result as usize)
+        }
+    }
+
+    fn write_vectored(&mut self, bufs: &[IoSlice<'_>]) -> std::io::Result<usize> {
+        let result = unsafe {
+            libc::writev(
+                1,
+                bufs.as_ptr() as *const libc::iovec,
+                std::cmp::min(bufs.len(), max_iov()) as libc::c_int,
+            )
+        };
+        if result < 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(result as usize)
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        // File descriptors don't buffer in the same way as stdio,
+        // but we can ensure data is written to the OS.
+        Ok(())
+    }
+}
+
+impl Default for StdOut {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Represents standard error (file descriptor 2).
+///
+/// This struct provides a low-level interface to stderr using direct libc syscalls.
+pub struct StdErr;
+
+impl StdErr {
+    /// Creates a new StdErr instance.
+    pub fn new() -> Self {
+        StdErr
+    }
+
+    /// Returns whether stderr is connected to a terminal.
+    ///
+    /// # Returns
+    /// `true` if stderr is a terminal, `false` otherwise.
+    pub fn isatty(&self) -> bool {
+        unsafe {
+            // SAFETY: isatty is always safe to call with any file descriptor.
+            // It returns 1 if the fd refers to a terminal, 0 otherwise.
+            libc::isatty(2) == 1
+        }
+    }
+
+    /// Returns the name of the terminal device connected to stderr.
+    ///
+    /// # Returns
+    /// * `Ok(String)` containing the terminal device name (e.g., "/dev/ttys001")
+    /// * `Err(std::io::Error)` if stderr is not connected to a terminal or an error occurs
+    pub fn ttyname(&self) -> std::io::Result<String> {
+        let mut buf = [0u8; 256];
+        let result = unsafe {
+            // SAFETY: We're calling ttyname_r with a valid file descriptor (2)
+            // and a properly allocated buffer with correct size.
+            libc::ttyname_r(2, buf.as_mut_ptr() as *mut libc::c_char, buf.len())
+        };
+
+        if result != 0 {
+            return Err(std::io::Error::from_raw_os_error(result));
+        }
+
+        let name = unsafe {
+            // SAFETY: ttyname_r guarantees a null-terminated string on success.
+            CStr::from_ptr(buf.as_ptr() as *const libc::c_char)
+        }
+        .to_str()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+        Ok(name.to_string())
+    }
+}
+
+impl std::io::Write for StdErr {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let result = unsafe {
+            // SAFETY: We're calling libc::write with a valid file descriptor (2 for stderr)
+            // and a properly allocated buffer with correct length.
+            libc::write(2, buf.as_ptr() as *const libc::c_void, buf.len())
+        };
+
+        if result < 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(result as usize)
+        }
+    }
+
+    fn write_vectored(&mut self, bufs: &[IoSlice<'_>]) -> std::io::Result<usize> {
+        let result = unsafe {
+            libc::writev(
+                2,
+                bufs.as_ptr() as *const libc::iovec,
+                std::cmp::min(bufs.len(), max_iov()) as libc::c_int,
+            )
+        };
+        if result < 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(result as usize)
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        // File descriptors don't buffer in the same way as stdio,
+        // but we can ensure data is written to the OS.
+        Ok(())
+    }
+}
+
+impl Default for StdErr {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]

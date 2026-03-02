@@ -1,8 +1,9 @@
 use std::{
-    ffi::{CStr, CString},
+    ffi::{CStr, CString, OsStr},
     io::{IoSlice, IoSliceMut},
     mem::MaybeUninit,
-    path::Path,
+    os::{fd::AsRawFd, unix::ffi::OsStrExt},
+    path::{Path, PathBuf},
     time::Duration,
 };
 
@@ -62,7 +63,7 @@ impl UtsName {
     /// # Returns
     /// - `Ok(UtsName)` containing the system information if successful
     /// - `Err(std::io::Error)` if the system call fails
-    pub fn uname() -> std::io::Result<Self> {
+    pub fn new() -> std::io::Result<Self> {
         let (res, utsname) = unsafe {
             // SAFETY: utsname is properly initialized by the system call if it returns 0.
             // We initialize the struct with MaybeUninit and only call assume_init after the system call.
@@ -183,7 +184,7 @@ impl UtsName {
 /// // Linux: "Linux hostname 5.15.0-1 #1 SMP ... x86_64 x86_64 x86_64 GNU/Linux"
 /// ```
 pub fn uname() -> std::io::Result<String> {
-    let info = UtsName::uname()?;
+    let info = UtsName::new()?;
 
     #[cfg(target_os = "macos")]
     {
@@ -310,7 +311,7 @@ pub fn process_setpriority(prio: i32) -> std::io::Result<()> {
 /// * `Ok(String)` containing the hostname if successful
 /// * `Err(std::io::Error)` if retrieving the hostname failed
 pub fn gethostname() -> std::io::Result<String> {
-    Ok(UtsName::uname()?.nodename().to_string())
+    Ok(UtsName::new()?.nodename().to_string())
 }
 
 #[link(name = "c")]
@@ -453,7 +454,7 @@ pub fn rand_string(len: usize) -> String {
     // Use SIMD optimization if available - round up to 16-byte boundary
     #[cfg(target_arch = "x86_64")]
     {
-        if is_x86_feature_detected!("ssse3") {
+        if len > 16 && is_x86_feature_detected!("ssse3") {
             // Round up to nearest 16-byte boundary for optimal SIMD processing
             let simd_len = (len + 15) & !15;
             let mut buf: Vec<u8> = Vec::with_capacity(simd_len);
@@ -483,7 +484,7 @@ pub fn rand_string(len: usize) -> String {
     // Use NEON optimization on ARM if available
     #[cfg(target_arch = "aarch64")]
     {
-        if std::arch::is_aarch64_feature_detected!("neon") {
+        if len > 16 && std::arch::is_aarch64_feature_detected!("neon") {
             // Round up to nearest 16-byte boundary for optimal SIMD processing
             let simd_len = (len + 15) & !15;
             let mut buf: Vec<u8> = Vec::with_capacity(simd_len);
@@ -593,10 +594,15 @@ unsafe fn rand_string_simd_ssse3(buf: &mut [u8]) {
         let len = buf.len();
         let mut i = 0;
 
+        debug_assert!(
+            buf.as_ptr().addr() & 15 == 0,
+            "pointer must be 16 byte aligned"
+        );
+
         // Process all bytes in 16-byte chunks (buffer length is guaranteed to be a multiple of 16)
         while i < len {
             // Load 16 random bytes
-            let input = _mm_loadu_si128(buf.as_ptr().add(i) as *const __m128i);
+            let input = _mm_load_si128(buf.as_ptr().add(i) as *const __m128i);
 
             // Extract 6 bits per byte (shift right by 2), giving us values 0-63
             let indices = _mm_srli_epi16(input, 2);
@@ -834,28 +840,24 @@ pub fn getloadavg() -> std::io::Result<[f64; 3]> {
     Ok(loadavg)
 }
 
-/// Returns disk usage information for a given path.
+/// Returns disk free information for a given path.
 ///
 /// # Arguments
 /// * `path` - The filesystem path to query
 ///
 /// # Returns
-/// * `Ok((used_bytes, total_bytes))` - A tuple containing the used bytes and total available bytes
+/// * `Ok((capacity_bytes, free_bytes))` - A tuple containing the total capacity and remaining space
 /// * `Err(std::io::Error)` if the system call fails or path is invalid
 ///
 /// # Example
 /// ```ignore
-/// let (used, total) = disk_usage("/").unwrap();
-/// println!("Disk usage: {} / {} bytes ({:.1}% used)",
-///          used, total, (used as f64 / total as f64) * 100.0);
+/// let (total, free) = disk_free("/").unwrap();
+/// println!("Disk free: {} / {} bytes ({:.1}% capacity)",
+///          free, total, ((total - free) as f64 / total as f64) * 100.0);
 /// ```
-pub fn disk_usage<P: AsRef<Path>>(path: P) -> std::io::Result<(u64, u64)> {
-    let path_cstr = CString::new(
-        path.as_ref()
-            .to_str()
-            .ok_or_else(|| std::io::Error::other("Invalid UTF-8 in path"))?,
-    )
-    .map_err(|_| std::io::Error::other("Path contains null byte"))?;
+pub fn disk_free<P: AsRef<Path>>(path: P) -> std::io::Result<(u64, u64)> {
+    let path_cstr = CString::new(path.as_ref().as_os_str().as_encoded_bytes())
+        .map_err(|_| std::io::Error::other("Path contains null byte"))?;
 
     let stat = unsafe {
         // SAFETY: statvfs is a valid POSIX system call. We initialize the structure with
@@ -867,48 +869,48 @@ pub fn disk_usage<P: AsRef<Path>>(path: P) -> std::io::Result<(u64, u64)> {
         stat.assume_init()
     };
 
-    // Total bytes = total blocks * fragment size
-    let total_bytes = stat.f_blocks as u64 * stat.f_frsize as u64;
-    // Used bytes = (total blocks - free blocks) * fragment size
-    let used_bytes = (stat.f_blocks - stat.f_bfree) as u64 * stat.f_frsize as u64;
+    let total_blocks = stat.f_blocks as u64;
+    let available_blocks = stat.f_bavail as u64;
+    let block_size = stat.f_frsize as u64;
 
-    Ok((used_bytes, total_bytes))
+    Ok((total_blocks * block_size, available_blocks * block_size))
 }
 
-/// Represents standard input (file descriptor 0).
-///
-/// This struct provides a low-level interface to stdin using direct libc syscalls.
-pub struct StdIn;
-
-impl StdIn {
-    /// Creates a new StdIn instance.
-    pub fn new() -> Self {
-        StdIn
-    }
-
+pub trait TtyInfo {
     /// Returns whether stdin is connected to a terminal.
     ///
     /// # Returns
     /// `true` if stdin is a terminal, `false` otherwise.
-    pub fn isatty(&self) -> bool {
-        unsafe {
-            // SAFETY: isatty is always safe to call with any file descriptor.
-            // It returns 1 if the fd refers to a terminal, 0 otherwise.
-            libc::isatty(0) == 1
-        }
-    }
+    fn isatty(&self) -> bool;
 
     /// Returns the name of the terminal device connected to stdin.
     ///
     /// # Returns
     /// * `Ok(String)` containing the terminal device name (e.g., "/dev/ttys001")
     /// * `Err(std::io::Error)` if stdin is not connected to a terminal or an error occurs
-    pub fn ttyname(&self) -> std::io::Result<String> {
-        let mut buf = [0u8; 256];
+    fn ttyname(&self) -> std::io::Result<PathBuf>;
+}
+
+impl<T: AsRawFd> TtyInfo for T {
+    fn isatty(&self) -> bool {
+        unsafe {
+            // SAFETY: isatty is always safe to call with any file descriptor.
+            // It returns 1 if the fd refers to a terminal, 0 otherwise.
+            libc::isatty(self.as_raw_fd()) == 1
+        }
+    }
+
+    fn ttyname(&self) -> std::io::Result<PathBuf> {
+        const TTY_NAME_MAX: usize = 128;
+        let mut buf = [0u8; TTY_NAME_MAX];
         let result = unsafe {
             // SAFETY: We're calling ttyname_r with a valid file descriptor (0)
             // and a properly allocated buffer with correct size.
-            libc::ttyname_r(0, buf.as_mut_ptr() as *mut libc::c_char, buf.len())
+            libc::ttyname_r(
+                self.as_raw_fd(),
+                buf.as_mut_ptr() as *mut libc::c_char,
+                buf.len(),
+            )
         };
 
         if result != 0 {
@@ -919,19 +921,40 @@ impl StdIn {
             // SAFETY: ttyname_r guarantees a null-terminated string on success.
             CStr::from_ptr(buf.as_ptr() as *const libc::c_char)
         }
-        .to_str()
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        .to_bytes();
 
-        Ok(name.to_string())
+        Ok(PathBuf::from(OsStr::from_bytes(name)))
     }
 }
 
-impl std::io::Read for StdIn {
+/// Represents standard input (file descriptor 0).
+///
+/// This struct provides a low-level interface to stdin using direct libc syscalls.
+pub struct Stdin;
+
+impl Stdin {
+    /// Creates a new StdIn instance.
+    pub fn new() -> Self {
+        Stdin
+    }
+}
+
+impl AsRawFd for Stdin {
+    fn as_raw_fd(&self) -> std::os::unix::prelude::RawFd {
+        libc::STDIN_FILENO
+    }
+}
+
+impl std::io::Read for Stdin {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let result = unsafe {
             // SAFETY: We're calling libc::read with a valid file descriptor (0 for stdin)
             // and a properly allocated buffer with correct length.
-            libc::read(0, buf.as_mut_ptr() as *mut libc::c_void, buf.len())
+            libc::read(
+                libc::STDIN_FILENO,
+                buf.as_mut_ptr() as *mut libc::c_void,
+                buf.len(),
+            )
         };
 
         if result < 0 {
@@ -944,7 +967,7 @@ impl std::io::Read for StdIn {
     fn read_vectored(&mut self, bufs: &mut [IoSliceMut<'_>]) -> std::io::Result<usize> {
         let result = unsafe {
             libc::readv(
-                0,
+                libc::STDIN_FILENO,
                 bufs.as_mut_ptr() as *mut libc::iovec as *const libc::iovec,
                 std::cmp::min(bufs.len(), max_iov()) as libc::c_int,
             )
@@ -957,7 +980,7 @@ impl std::io::Read for StdIn {
     }
 }
 
-impl Default for StdIn {
+impl Default for Stdin {
     fn default() -> Self {
         Self::new()
     }
@@ -966,60 +989,31 @@ impl Default for StdIn {
 /// Represents standard output (file descriptor 1).
 ///
 /// This struct provides a low-level interface to stdout using direct libc syscalls.
-pub struct StdOut;
+pub struct Stdout;
 
-impl StdOut {
+impl Stdout {
     /// Creates a new StdOut instance.
     pub fn new() -> Self {
-        StdOut
-    }
-
-    /// Returns whether stdout is connected to a terminal.
-    ///
-    /// # Returns
-    /// `true` if stdout is a terminal, `false` otherwise.
-    pub fn isatty(&self) -> bool {
-        unsafe {
-            // SAFETY: isatty is always safe to call with any file descriptor.
-            // It returns 1 if the fd refers to a terminal, 0 otherwise.
-            libc::isatty(1) == 1
-        }
-    }
-
-    /// Returns the name of the terminal device connected to stdout.
-    ///
-    /// # Returns
-    /// * `Ok(String)` containing the terminal device name (e.g., "/dev/ttys001")
-    /// * `Err(std::io::Error)` if stdout is not connected to a terminal or an error occurs
-    pub fn ttyname(&self) -> std::io::Result<String> {
-        let mut buf = [0u8; 256];
-        let result = unsafe {
-            // SAFETY: We're calling ttyname_r with a valid file descriptor (1)
-            // and a properly allocated buffer with correct size.
-            libc::ttyname_r(1, buf.as_mut_ptr() as *mut libc::c_char, buf.len())
-        };
-
-        if result != 0 {
-            return Err(std::io::Error::from_raw_os_error(result));
-        }
-
-        let name = unsafe {
-            // SAFETY: ttyname_r guarantees a null-terminated string on success.
-            CStr::from_ptr(buf.as_ptr() as *const libc::c_char)
-        }
-        .to_str()
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-
-        Ok(name.to_string())
+        Stdout
     }
 }
 
-impl std::io::Write for StdOut {
+impl AsRawFd for Stdout {
+    fn as_raw_fd(&self) -> std::os::unix::prelude::RawFd {
+        libc::STDOUT_FILENO
+    }
+}
+
+impl std::io::Write for Stdout {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let result = unsafe {
             // SAFETY: We're calling libc::write with a valid file descriptor (1 for stdout)
             // and a properly allocated buffer with correct length.
-            libc::write(1, buf.as_ptr() as *const libc::c_void, buf.len())
+            libc::write(
+                libc::STDOUT_FILENO,
+                buf.as_ptr() as *const libc::c_void,
+                buf.len(),
+            )
         };
 
         if result < 0 {
@@ -1032,7 +1026,7 @@ impl std::io::Write for StdOut {
     fn write_vectored(&mut self, bufs: &[IoSlice<'_>]) -> std::io::Result<usize> {
         let result = unsafe {
             libc::writev(
-                1,
+                libc::STDOUT_FILENO,
                 bufs.as_ptr() as *const libc::iovec,
                 std::cmp::min(bufs.len(), max_iov()) as libc::c_int,
             )
@@ -1051,7 +1045,7 @@ impl std::io::Write for StdOut {
     }
 }
 
-impl Default for StdOut {
+impl Default for Stdout {
     fn default() -> Self {
         Self::new()
     }
@@ -1060,60 +1054,31 @@ impl Default for StdOut {
 /// Represents standard error (file descriptor 2).
 ///
 /// This struct provides a low-level interface to stderr using direct libc syscalls.
-pub struct StdErr;
+pub struct Stderr;
 
-impl StdErr {
+impl Stderr {
     /// Creates a new StdErr instance.
     pub fn new() -> Self {
-        StdErr
-    }
-
-    /// Returns whether stderr is connected to a terminal.
-    ///
-    /// # Returns
-    /// `true` if stderr is a terminal, `false` otherwise.
-    pub fn isatty(&self) -> bool {
-        unsafe {
-            // SAFETY: isatty is always safe to call with any file descriptor.
-            // It returns 1 if the fd refers to a terminal, 0 otherwise.
-            libc::isatty(2) == 1
-        }
-    }
-
-    /// Returns the name of the terminal device connected to stderr.
-    ///
-    /// # Returns
-    /// * `Ok(String)` containing the terminal device name (e.g., "/dev/ttys001")
-    /// * `Err(std::io::Error)` if stderr is not connected to a terminal or an error occurs
-    pub fn ttyname(&self) -> std::io::Result<String> {
-        let mut buf = [0u8; 256];
-        let result = unsafe {
-            // SAFETY: We're calling ttyname_r with a valid file descriptor (2)
-            // and a properly allocated buffer with correct size.
-            libc::ttyname_r(2, buf.as_mut_ptr() as *mut libc::c_char, buf.len())
-        };
-
-        if result != 0 {
-            return Err(std::io::Error::from_raw_os_error(result));
-        }
-
-        let name = unsafe {
-            // SAFETY: ttyname_r guarantees a null-terminated string on success.
-            CStr::from_ptr(buf.as_ptr() as *const libc::c_char)
-        }
-        .to_str()
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-
-        Ok(name.to_string())
+        Stderr
     }
 }
 
-impl std::io::Write for StdErr {
+impl AsRawFd for Stderr {
+    fn as_raw_fd(&self) -> std::os::unix::prelude::RawFd {
+        libc::STDERR_FILENO
+    }
+}
+
+impl std::io::Write for Stderr {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let result = unsafe {
             // SAFETY: We're calling libc::write with a valid file descriptor (2 for stderr)
             // and a properly allocated buffer with correct length.
-            libc::write(2, buf.as_ptr() as *const libc::c_void, buf.len())
+            libc::write(
+                libc::STDERR_FILENO,
+                buf.as_ptr() as *const libc::c_void,
+                buf.len(),
+            )
         };
 
         if result < 0 {
@@ -1126,7 +1091,7 @@ impl std::io::Write for StdErr {
     fn write_vectored(&mut self, bufs: &[IoSlice<'_>]) -> std::io::Result<usize> {
         let result = unsafe {
             libc::writev(
-                2,
+                libc::STDERR_FILENO,
                 bufs.as_ptr() as *const libc::iovec,
                 std::cmp::min(bufs.len(), max_iov()) as libc::c_int,
             )
@@ -1145,7 +1110,7 @@ impl std::io::Write for StdErr {
     }
 }
 
-impl Default for StdErr {
+impl Default for Stderr {
     fn default() -> Self {
         Self::new()
     }
@@ -1157,7 +1122,7 @@ mod tests {
 
     #[test]
     fn test_uname_success() {
-        let uname = UtsName::uname().expect("Failed to get system information");
+        let uname = UtsName::new().expect("Failed to get system information");
 
         // Test that none of the fields are empty and are valid UTF-8
         assert!(!uname.sysname().is_empty());
@@ -1246,7 +1211,7 @@ mod tests {
         assert!(!hostname.is_empty(), "Hostname should not be empty");
 
         // The hostname should match what we get from UtsName directly
-        let uname = UtsName::uname().expect("Failed to get system information");
+        let uname = UtsName::new().expect("Failed to get system information");
         assert_eq!(hostname, uname.nodename());
     }
 
@@ -1341,7 +1306,51 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(target_arch = "aarch64")]
+    fn test_rand_string_simd_neon_consistency() {
+        // Test that SIMD and scalar implementations produce the same output
+        // for the same input random bytes
+
+        const TEST_SIZES: &[usize] = &[16, 32, 48, 64, 80, 128, 256];
+
+        for &size in TEST_SIZES {
+            // Generate random bytes (size is always a multiple of 16)
+            let mut random_bytes = vec![0u8; size];
+            rand_bytes(&mut random_bytes).unwrap();
+
+            // Process with scalar
+            let mut scalar_result = random_bytes.clone();
+            rand_string_scalar(&mut scalar_result);
+
+            // Process with SIMD (if available)
+            let mut simd_result = random_bytes.clone();
+            if std::arch::is_aarch64_feature_detected!("neon") {
+                unsafe { rand_string_simd_neon(&mut simd_result) };
+            }
+
+            // Compare results
+            if std::arch::is_aarch64_feature_detected!("neon") {
+                assert_eq!(
+                    scalar_result, simd_result,
+                    "SIMD and scalar results differ for size {}",
+                    size
+                );
+            }
+
+            // Verify all bytes are valid charset characters
+            const VALID_CHARS: &[u8] =
+                b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+            for &byte in &scalar_result {
+                assert!(
+                    VALID_CHARS.contains(&byte),
+                    "Invalid character: {}",
+                    byte as char
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_rand_string_lengths() {
         // Test that rand_string works correctly for various lengths including
         // those that aren't multiples of 16
@@ -1372,7 +1381,6 @@ mod tests {
     #[test]
     fn test_rss_self() {
         let rss = rss_self();
-        dbg!(rss);
         assert!(rss > 0, "RSS should be greater than 0");
     }
 
@@ -1393,28 +1401,27 @@ mod tests {
     }
 
     #[test]
-    fn test_disk_usage() {
-        // Test disk usage for root directory
-        let result = disk_usage("/");
+    fn test_disk_free() {
+        let result = disk_free("/");
         assert!(result.is_ok(), "Failed to get disk usage for /");
 
-        let (used, total) = result.unwrap();
-        assert!(total > 0, "Total bytes should be greater than 0");
-        assert!(used > 0, "Used bytes should be greater than 0");
+        let (total, free) = result.unwrap();
+        assert!(free > 0, "Total bytes should be greater than 0");
+        assert!(total > 0, "Used bytes should be greater than 0");
         assert!(
-            used <= total,
+            free <= total,
             "Used bytes should be less than or equal to total bytes"
         );
 
         // Test with current directory
-        let result = disk_usage(".");
+        let result = disk_free(".");
         assert!(
             result.is_ok(),
             "Failed to get disk usage for current directory"
         );
 
         // Test with invalid path
-        let result = disk_usage("/nonexistent/path/that/does/not/exist");
+        let result = disk_free("/nonexistent/path/that/does/not/exist");
         assert!(result.is_err(), "Should fail for non-existent path");
     }
 }

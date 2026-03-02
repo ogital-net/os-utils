@@ -10,7 +10,7 @@ fn main() -> std::io::Result<()> {
 
     // Get individual fields
     println!("Individual fields:");
-    let info = UtsName::uname()?;
+    let info = UtsName::new()?;
     println!("  System name: {}", info.sysname());
     println!("  Node name:   {}", info.nodename());
     println!("  Release:     {}", info.release());

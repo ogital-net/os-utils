@@ -1,11 +1,11 @@
-use os_utils::{StdErr, StdIn, StdOut};
+use os_utils::{Stderr, Stdin, Stdout};
 use std::io::{Read, Write};
 
 fn main() {
     // Create instances of the standard streams
-    let mut stdin = StdIn::new();
-    let mut stdout = StdOut::new();
-    let mut stderr = StdErr::new();
+    let mut stdin = Stdin::new();
+    let mut stdout = Stdout::new();
+    let mut stderr = Stderr::new();
 
     // Write to stdout
     let msg = b"Enter some text: ";

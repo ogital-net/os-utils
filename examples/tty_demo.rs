@@ -1,9 +1,9 @@
-use os_utils::{StdErr, StdIn, StdOut};
+use os_utils::{Stderr, Stdin, Stdout, TtyInfo as _};
 
 fn main() {
-    let stdin = StdIn::new();
-    let stdout = StdOut::new();
-    let stderr = StdErr::new();
+    let stdin = Stdin::new();
+    let stdout = Stdout::new();
+    let stderr = Stderr::new();
 
     println!("=== Terminal Information ===\n");
 
@@ -11,7 +11,7 @@ fn main() {
     print!("stdin  (fd 0): ");
     if stdin.isatty() {
         match stdin.ttyname() {
-            Ok(name) => println!("Connected to terminal: {}", name),
+            Ok(name) => println!("Connected to terminal: {}", name.display()),
             Err(e) => println!("Error getting tty name: {}", e),
         }
     } else {
@@ -22,7 +22,7 @@ fn main() {
     print!("stdout (fd 1): ");
     if stdout.isatty() {
         match stdout.ttyname() {
-            Ok(name) => println!("Connected to terminal: {}", name),
+            Ok(name) => println!("Connected to terminal: {}", name.display()),
             Err(e) => println!("Error getting tty name: {}", e),
         }
     } else {
@@ -33,7 +33,7 @@ fn main() {
     print!("stderr (fd 2): ");
     if stderr.isatty() {
         match stderr.ttyname() {
-            Ok(name) => println!("Connected to terminal: {}", name),
+            Ok(name) => println!("Connected to terminal: {}", name.display()),
             Err(e) => println!("Error getting tty name: {}", e),
         }
     } else {

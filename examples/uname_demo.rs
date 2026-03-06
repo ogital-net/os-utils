@@ -1,4 +1,4 @@
-use os_utils::{UtsName, uname};
+use os_utils::{uname, UtsName};
 
 fn main() -> std::io::Result<()> {
     println!("=== System Information Demo ===\n");

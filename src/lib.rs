@@ -1097,6 +1097,72 @@ impl Default for Stderr {
     }
 }
 
+/// A cryptographically secure random number generator that uses the operating system's
+/// random number generation facilities.
+///
+/// `OsRng` is a zero-sized type that implements [`rand_core::TryRng`] and [`rand_core::TryCryptoRng`],
+/// providing a bridge to use OS-level random number generation with the `rand_core` trait ecosystem.
+///
+/// # Platform-specific implementations
+///
+/// - **Linux**: Uses the `getrandom` system call
+/// - **macOS**: Uses the `CCRandomGenerateBytes` function from Common Crypto
+///
+/// Both implementations provide cryptographically secure random numbers suitable for
+/// security-sensitive applications.
+///
+/// # Feature flag
+///
+/// This type is only available when the `rand` feature is enabled.
+///
+/// # Errors
+///
+/// The `TryRng` trait methods return `Result<T, Infallible>`, meaning they never fail.
+/// Any underlying OS errors are handled by panicking in the [`rand_bytes`] function.
+///
+/// # Examples
+///
+/// ```ignore
+/// use os_utils::OsRng;
+/// use rand_core::TryRng;
+///
+/// let mut rng = OsRng;
+///
+/// // Generate a random u32
+/// let random_u32 = rng.try_next_u32().unwrap();
+///
+/// // Generate a random u64
+/// let random_u64 = rng.try_next_u64().unwrap();
+///
+/// // Fill a buffer with random bytes
+/// let mut buffer = [0u8; 32];
+/// rng.try_fill_bytes(&mut buffer).unwrap();
+/// ```
+#[cfg(feature = "rand")]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct OsRng;
+
+#[cfg(feature = "rand")]
+impl rand_core::TryRng for OsRng {
+    type Error = core::convert::Infallible;
+
+    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+        Ok(rand_u32())
+    }
+
+    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+        Ok(rand_u64())
+    }
+
+    fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
+        rand_bytes(dst).expect("failed to generate random bytes");
+        Ok(())
+    }
+}
+
+#[cfg(feature = "rand")]
+impl rand_core::TryCryptoRng for OsRng {}
+
 #[cfg(test)]
 mod tests {
     use super::*;

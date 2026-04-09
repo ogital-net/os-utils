@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use std::{
     ffi::{CStr, CString, OsStr},
     fmt::Write as _,
@@ -64,6 +66,16 @@ impl UtsName {
     /// # Returns
     /// - `Ok(UtsName)` containing the system information if successful
     /// - `Err(std::io::Error)` if the system call fails
+    ///
+    /// # Example
+    /// ```
+    /// let info = os_utils::UtsName::new().unwrap();
+    /// println!("System: {}", info.sysname());
+    /// println!("Node: {}", info.nodename());
+    /// println!("Release: {}", info.release());
+    /// println!("Version: {}", info.version());
+    /// println!("Machine: {}", info.machine());
+    /// ```
     pub fn new() -> std::io::Result<Self> {
         let (res, utsname) = unsafe {
             // SAFETY: utsname is properly initialized by the system call if it returns 0.
@@ -246,6 +258,15 @@ impl From<SchedPolicy> for libc::c_int {
 ///
 /// # Notes
 /// Setting real-time scheduling policies (FIFO, RoundRobin) typically requires root privileges.
+///
+/// # Example
+/// ```no_run
+/// use os_utils::{SchedPolicy, thread_setscheduler};
+/// // Real-time policies require root privileges
+/// thread_setscheduler(SchedPolicy::RoundRobin, 1).unwrap();
+/// // Standard scheduling works without elevated privileges
+/// thread_setscheduler(SchedPolicy::Other, 0).unwrap();
+/// ```
 pub fn thread_setscheduler(policy: SchedPolicy, sched_priority: i32) -> std::io::Result<()> {
     // SAFETY: MaybeUninit::zeroed() initializes all bytes to zero, which is a valid
     // initialization for libc::sched_param.
@@ -273,6 +294,12 @@ pub fn thread_setscheduler(policy: SchedPolicy, sched_priority: i32) -> std::io:
 ///
 /// # Notes
 /// Setting a negative nice value (higher priority) typically requires root privileges.
+///
+/// # Example
+/// ```
+/// // Lowering priority (higher nice value) does not require elevated privileges
+/// os_utils::process_setpriority(10).unwrap();
+/// ```
 pub fn process_setpriority(prio: i32) -> std::io::Result<()> {
     // SAFETY: setpriority is a valid POSIX function. The arguments are safe:
     // PRIO_PROCESS is a valid constant, getpid() returns the current process ID,
@@ -291,6 +318,12 @@ pub fn process_setpriority(prio: i32) -> std::io::Result<()> {
 /// # Returns
 /// * `Ok(String)` containing the hostname if successful
 /// * `Err(std::io::Error)` if retrieving the hostname failed
+///
+/// # Example
+/// ```
+/// let hostname = os_utils::gethostname().unwrap();
+/// println!("Hostname: {}", hostname);
+/// ```
 pub fn gethostname() -> std::io::Result<String> {
     Ok(UtsName::new()?.nodename().to_string())
 }
@@ -306,6 +339,12 @@ unsafe extern "C" {
 ///
 /// # Returns
 /// A `Duration` representing how long the system has been running.
+///
+/// # Example
+/// ```
+/// let uptime = os_utils::uptime_sys();
+/// println!("System uptime: {:?}", uptime);
+/// ```
 pub fn uptime_sys() -> Duration {
     unsafe { Duration::from_nanos(uptime_sys_c()) }
 }
@@ -317,6 +356,12 @@ pub fn uptime_sys() -> Duration {
 ///
 /// # Returns
 /// A `Duration` representing how long the process has been running.
+///
+/// # Example
+/// ```
+/// let uptime = os_utils::uptime_proc(std::process::id());
+/// println!("Process uptime: {:?}", uptime);
+/// ```
 pub fn uptime_proc(id: u32) -> Duration {
     unsafe { Duration::from_nanos(uptime_proc_c(id as i32)) }
 }
@@ -327,6 +372,12 @@ pub fn uptime_proc(id: u32) -> Duration {
 ///
 /// # Returns
 /// A `Duration` representing how long the container has been running.
+///
+/// # Example
+/// ```
+/// let uptime = os_utils::uptime_container();
+/// println!("Container uptime: {:?}", uptime);
+/// ```
 pub fn uptime_container() -> Duration {
     uptime_proc(1)
 }
@@ -342,6 +393,12 @@ pub fn uptime_container() -> Duration {
 /// # Platform-specific
 /// - **macOS/Darwin**: Uses `task_info` with `TASK_BASIC_INFO` to get memory information.
 /// - **Linux**: Reads from `/proc/self/statm` and converts pages to bytes.
+///
+/// # Example
+/// ```
+/// let rss = os_utils::rss_self();
+/// println!("RSS: {} bytes", rss);
+/// ```
 pub fn rss_self() -> usize {
     unsafe { rss_self_c() }
 }
@@ -357,6 +414,15 @@ pub fn rss_self() -> usize {
 ///
 /// # Platform-specific
 /// This implementation is only available on Linux systems.
+///
+/// # Example
+/// ```
+/// use os_utils::{rand_bytes, rand_u32, rand_u64};
+/// let mut buffer = vec![0u8; 32];
+/// rand_bytes(&mut buffer).unwrap();
+/// println!("Random u32: {}", rand_u32());
+/// println!("Random u64: {}", rand_u64());
+/// ```
 #[cfg(target_os = "linux")]
 pub fn rand_bytes(dst: &mut [u8]) -> std::io::Result<()> {
     let need = dst.len();
@@ -390,6 +456,15 @@ pub fn rand_bytes(dst: &mut [u8]) -> std::io::Result<()> {
 ///
 /// # Platform-specific
 /// This implementation is only available on macOS systems.
+///
+/// # Example
+/// ```
+/// use os_utils::{rand_bytes, rand_u32, rand_u64};
+/// let mut buffer = vec![0u8; 32];
+/// rand_bytes(&mut buffer).unwrap();
+/// println!("Random u32: {}", rand_u32());
+/// println!("Random u64: {}", rand_u64());
+/// ```
 #[cfg(target_os = "macos")]
 pub fn rand_bytes(dst: &mut [u8]) -> std::io::Result<()> {
     let need = dst.len();
@@ -470,6 +545,12 @@ pub fn rand_u64() -> u64 {
 ///
 /// # Platform-specific
 /// This implementation is only available on macOS systems.
+///
+/// # Example
+/// ```
+/// let [one, five, fifteen] = os_utils::getloadavg().unwrap();
+/// println!("Load averages: {:.2} {:.2} {:.2}", one, five, fifteen);
+/// ```
 #[cfg(target_os = "macos")]
 pub fn getloadavg() -> std::io::Result<[f64; 3]> {
     let mut loadavg = [0f64, 0f64, 0f64];
@@ -492,6 +573,12 @@ pub fn getloadavg() -> std::io::Result<[f64; 3]> {
 ///
 /// # Platform-specific
 /// This implementation is only available on Linux systems.
+///
+/// # Example
+/// ```
+/// let [one, five, fifteen] = os_utils::getloadavg().unwrap();
+/// println!("Load averages: {:.2} {:.2} {:.2}", one, five, fifteen);
+/// ```
 #[cfg(target_os = "linux")]
 pub fn getloadavg() -> std::io::Result<[f64; 3]> {
     let mut loadavg = [0f64, 0f64, 0f64];
@@ -550,6 +637,16 @@ pub fn disk_free<P: AsRef<Path>>(path: P) -> std::io::Result<(u64, u64)> {
     Ok((total_blocks * block_size, available_blocks * block_size))
 }
 
+/// # Example
+/// ```
+/// use os_utils::TtyInfo;
+/// let stdin = os_utils::Stdin::new();
+/// if stdin.isatty() {
+///     println!("Terminal: {}", stdin.ttyname().unwrap().display());
+/// } else {
+///     println!("stdin is not a TTY");
+/// }
+/// ```
 pub trait TtyInfo {
     /// Returns whether stdin is connected to a terminal.
     ///
@@ -667,6 +764,13 @@ pub struct Stdout;
 
 impl Stdout {
     /// Creates a new StdOut instance.
+    ///
+    /// # Example
+    /// ```
+    /// use std::io::Write;
+    /// let mut out = os_utils::Stdout::new();
+    /// out.write_all(b"hello from libc write\n").unwrap();
+    /// ```
     pub fn new() -> Self {
         Stdout
     }

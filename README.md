@@ -121,8 +121,8 @@ fn main() -> std::io::Result<()> {
     rand_bytes(&mut buffer)?;
 
     // Generate random integers
-    println!("Random u32: {}", rand_u32());
-    println!("Random u64: {}", rand_u64());
+    println!("Random u32: {}", rand_u32()?);
+    println!("Random u64: {}", rand_u64()?);
 
     Ok(())
 }

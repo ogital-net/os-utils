@@ -1,6 +1,10 @@
 #![doc = include_str!("../README.md")]
+// README and other crate-level docs use `fn main` for blocks that would otherwise
+// produce bare-expression lint warnings; allow it explicitly.
+#![allow(clippy::needless_doctest_main)]
 
 use std::{
+    borrow::Cow,
     ffi::{CStr, CString, OsStr},
     fmt::Write as _,
     io::{IoSlice, IoSliceMut},
@@ -93,97 +97,92 @@ impl UtsName {
 
     /// Returns the operating system name (e.g., "Linux", "Darwin").
     ///
-    /// # Panics
-    /// Panics if the system name contains invalid UTF-8 characters.
-    pub fn sysname(&self) -> &str {
-        unsafe {
-            // SAFETY: The sysname field in libc::utsname is guaranteed to contain a valid
-            // null-terminated C string that was initialized by the uname system call.
-            CStr::from_ptr(self.inner.sysname.as_ptr())
-                .to_str()
-                .unwrap()
-        }
+    /// Returns a borrowed `Cow::Borrowed(&str)` when the value is valid UTF-8, or an
+    /// owned `Cow::Owned(String)` with non-UTF-8 bytes replaced by `U+FFFD`. The value
+    /// returned by the kernel is preserved losslessly when it is UTF-8 and is otherwise
+    /// recoverable instead of panicking.
+    #[must_use]
+    pub fn sysname(&self) -> Cow<'_, str> {
+        // SAFETY: The sysname field in libc::utsname is a null-terminated C string
+        // initialized by the uname system call.
+        unsafe { CStr::from_ptr(self.inner.sysname.as_ptr()).to_string_lossy() }
     }
 
     /// Returns the network node hostname.
     ///
-    /// # Panics
-    /// Panics if the hostname contains invalid UTF-8 characters.
-    pub fn nodename(&self) -> &str {
-        unsafe {
-            // SAFETY: The nodename field in libc::utsname is guaranteed to contain a valid
-            // null-terminated C string that was initialized by the uname system call.
-            CStr::from_ptr(self.inner.nodename.as_ptr())
-                .to_str()
-                .unwrap()
-        }
+    /// Returns a borrowed `Cow::Borrowed(&str)` when the value is valid UTF-8, or an
+    /// owned `Cow::Owned(String)` with non-UTF-8 bytes replaced by `U+FFFD`. The value
+    /// returned by the kernel is preserved losslessly when it is UTF-8 and is otherwise
+    /// recoverable instead of panicking.
+    #[must_use]
+    pub fn nodename(&self) -> Cow<'_, str> {
+        // SAFETY: The nodename field in libc::utsname is a null-terminated C string
+        // initialized by the uname system call.
+        unsafe { CStr::from_ptr(self.inner.nodename.as_ptr()).to_string_lossy() }
     }
 
     /// Returns the operating system release level.
     ///
-    /// # Panics
-    /// Panics if the release string contains invalid UTF-8 characters.
-    pub fn release(&self) -> &str {
-        unsafe {
-            // SAFETY: The release field in libc::utsname is guaranteed to contain a valid
-            // null-terminated C string that was initialized by the uname system call.
-            CStr::from_ptr(self.inner.release.as_ptr())
-                .to_str()
-                .unwrap()
-        }
+    /// Returns a borrowed `Cow::Borrowed(&str)` when the value is valid UTF-8, or an
+    /// owned `Cow::Owned(String)` with non-UTF-8 bytes replaced by `U+FFFD`. The value
+    /// returned by the kernel is preserved losslessly when it is UTF-8 and is otherwise
+    /// recoverable instead of panicking.
+    #[must_use]
+    pub fn release(&self) -> Cow<'_, str> {
+        // SAFETY: The release field in libc::utsname is a null-terminated C string
+        // initialized by the uname system call.
+        unsafe { CStr::from_ptr(self.inner.release.as_ptr()).to_string_lossy() }
     }
 
     /// Returns the operating system version.
     ///
-    /// # Panics
-    /// Panics if the version string contains invalid UTF-8 characters.
-    pub fn version(&self) -> &str {
-        unsafe {
-            // SAFETY: The version field in libc::utsname is guaranteed to contain a valid
-            // null-terminated C string that was initialized by the uname system call.
-            CStr::from_ptr(self.inner.version.as_ptr())
-                .to_str()
-                .unwrap()
-        }
+    /// Returns a borrowed `Cow::Borrowed(&str)` when the value is valid UTF-8, or an
+    /// owned `Cow::Owned(String)` with non-UTF-8 bytes replaced by `U+FFFD`. The value
+    /// returned by the kernel is preserved losslessly when it is UTF-8 and is otherwise
+    /// recoverable instead of panicking.
+    #[must_use]
+    pub fn version(&self) -> Cow<'_, str> {
+        // SAFETY: The version field in libc::utsname is a null-terminated C string
+        // initialized by the uname system call.
+        unsafe { CStr::from_ptr(self.inner.version.as_ptr()).to_string_lossy() }
     }
 
     /// Returns the machine hardware name.
     ///
-    /// # Panics
-    /// Panics if the machine name contains invalid UTF-8 characters.
-    pub fn machine(&self) -> &str {
-        unsafe {
-            // SAFETY: The machine field in libc::utsname is guaranteed to contain a valid
-            // null-terminated C string that was initialized by the uname system call.
-            CStr::from_ptr(self.inner.machine.as_ptr())
-                .to_str()
-                .unwrap()
-        }
+    /// Returns a borrowed `Cow::Borrowed(&str)` when the value is valid UTF-8, or an
+    /// owned `Cow::Owned(String)` with non-UTF-8 bytes replaced by `U+FFFD`. The value
+    /// returned by the kernel is preserved losslessly when it is UTF-8 and is otherwise
+    /// recoverable instead of panicking.
+    #[must_use]
+    pub fn machine(&self) -> Cow<'_, str> {
+        // SAFETY: The machine field in libc::utsname is a null-terminated C string
+        // initialized by the uname system call.
+        unsafe { CStr::from_ptr(self.inner.machine.as_ptr()).to_string_lossy() }
     }
 
     /// Returns the Network Information System (NIS) domain name.
     ///
     /// This method is only available on Linux systems.
     ///
-    /// # Panics
-    /// Panics if the domain name contains invalid UTF-8 characters.
+    /// Returns a borrowed `Cow::Borrowed(&str)` when the value is valid UTF-8, or an
+    /// owned `Cow::Owned(String)` with non-UTF-8 bytes replaced by `U+FFFD`. The value
+    /// returned by the kernel is preserved losslessly when it is UTF-8 and is otherwise
+    /// recoverable instead of panicking.
     #[cfg(target_os = "linux")]
-    pub fn domainname(&self) -> &str {
-        unsafe {
-            // SAFETY: The domainname field in libc::utsname is guaranteed to contain a valid
-            // null-terminated C string that was initialized by the uname system call.
-            CStr::from_ptr(self.inner.domainname.as_ptr())
-                .to_str()
-                .unwrap()
-        }
+    #[must_use]
+    pub fn domainname(&self) -> Cow<'_, str> {
+        // SAFETY: The domainname field in libc::utsname is a null-terminated C string
+        // initialized by the uname system call.
+        unsafe { CStr::from_ptr(self.inner.domainname.as_ptr()).to_string_lossy() }
     }
 }
 
-/// Returns system information in the same format as the `uname -a` command.
+/// Returns system information as a single space-separated string.
 ///
-/// The format matches platform-specific output:
-/// - **macOS**: `sysname nodename release version machine`
-/// - **Linux**: `sysname nodename release version machine processor platform os`
+/// The output intentionally mirrors the format of `uname -snrvmo`, not `uname -a`:
+/// some Linux distributions ship a patched `uname` whose `-a` output is
+/// non-standard, so the exact field set and order of `uname -a` is not portable.
+/// Use [`UtsName`] directly when the individual fields are needed.
 ///
 /// # Returns
 /// * `Ok(String)` containing the formatted system information
@@ -193,8 +192,8 @@ impl UtsName {
 /// ```
 /// let info = os_utils::uname().unwrap();
 /// println!("{}", info);
-/// // macOS: "Darwin hostname 23.6.0 Darwin Kernel Version 23.6.0:... x86_64"
-/// // Linux: "Linux hostname 5.15.0-1 #1 SMP ... x86_64 x86_64 x86_64 GNU/Linux"
+/// // Linux:   "Linux hostname 5.15.0-1 #1 SMP ... x86_64 GNU/Linux"
+/// // macOS:   "Darwin hostname 23.6.0 Darwin Kernel Version 23.6.0:... x86_64"
 /// ```
 pub fn uname() -> std::io::Result<String> {
     let info = UtsName::new()?;
@@ -313,7 +312,11 @@ pub fn process_setpriority(prio: i32) -> std::io::Result<()> {
 
 /// Returns the hostname of the system.
 ///
-/// This is a convenience wrapper around `UtsName::uname()?.nodename()`.
+/// This is a convenience wrapper around `UtsName::new()?.nodename()`. The
+/// hostname is owned (an allocation) because `UtsName` is consumed for the
+/// duration of the call and the result outlives it; use
+/// [`UtsName::new`] directly if you need to avoid the allocation or read
+/// other fields from the same uname snapshot.
 ///
 /// # Returns
 /// * `Ok(String)` containing the hostname if successful
@@ -325,7 +328,7 @@ pub fn process_setpriority(prio: i32) -> std::io::Result<()> {
 /// println!("Hostname: {}", hostname);
 /// ```
 pub fn gethostname() -> std::io::Result<String> {
-    Ok(UtsName::new()?.nodename().to_string())
+    Ok(UtsName::new()?.nodename().into_owned())
 }
 
 #[link(name = "c")]
@@ -352,7 +355,10 @@ pub fn uptime_sys() -> Duration {
 /// Returns the uptime of a specific process.
 ///
 /// # Arguments
-/// * `id` - Process ID to get the uptime for
+/// * `id` - Process ID to get the uptime for. Must fit in an `i32` (i.e. ≤ 2^31 − 1),
+///   matching the OS-level `pid_t` width on supported platforms. Larger values
+///   return an `InvalidInput` error rather than silently wrapping to a negative
+///   PID that would be rejected by the kernel.
 ///
 /// # Returns
 /// A `Duration` representing how long the process has been running.
@@ -363,7 +369,8 @@ pub fn uptime_sys() -> Duration {
 /// println!("Process uptime: {:?}", uptime);
 /// ```
 pub fn uptime_proc(id: u32) -> Duration {
-    unsafe { Duration::from_nanos(uptime_proc_c(id as i32)) }
+    let pid = i32::try_from(id).expect("pid exceeds i32::MAX");
+    unsafe { Duration::from_nanos(uptime_proc_c(pid)) }
 }
 
 /// Returns the uptime of the container (for containerized environments).
@@ -385,10 +392,9 @@ pub fn uptime_container() -> Duration {
 /// Returns the resident set size (RSS) of the current process.
 ///
 /// The resident set size is the portion of a process's memory that is held in main memory (RAM).
-/// This is useful for monitoring memory usage of the running process.
-///
-/// # Returns
-/// The resident set size in bytes.
+/// Returns `0` on systems where RSS cannot be read (for example, kernels without
+/// `/proc/self/statm`, or macOS sandbox profiles that deny `task_info`); use
+/// [`rss_self_opt`] to distinguish that case from a real zero-byte measurement.
 ///
 /// # Platform-specific
 /// - **macOS/Darwin**: Uses `task_info` with `TASK_BASIC_INFO` to get memory information.
@@ -400,7 +406,37 @@ pub fn uptime_container() -> Duration {
 /// println!("RSS: {} bytes", rss);
 /// ```
 pub fn rss_self() -> usize {
-    unsafe { rss_self_c() }
+    rss_self_opt().unwrap_or(0)
+}
+
+/// Returns the resident set size (RSS) of the current process, or `None` if it
+/// could not be measured.
+///
+/// See [`rss_self`] for details. This variant is preferred when the caller
+/// needs to distinguish a real zero-byte measurement from a failure to read
+/// the underlying kernel interface (for example, to log an error rather than
+/// silently report zero memory usage).
+///
+/// # Example
+/// ```
+/// if let Some(rss) = os_utils::rss_self_opt() {
+///     println!("RSS: {} bytes", rss);
+/// } else {
+///     println!("RSS unavailable on this platform");
+/// }
+/// ```
+pub fn rss_self_opt() -> Option<usize> {
+    // `rss_self_c` returns `usize::MAX` to signal "could not measure" (e.g.
+    // /proc/self/statm unreadable, fscanf parse failure, or sysconf returning
+    // a non-positive page size). A real running process always has at least
+    // one resident page, so the success path produces at least `_SC_PAGESIZE`
+    // bytes — never 0 and never anywhere near usize::MAX on any real hardware.
+    let rss = unsafe { rss_self_c() };
+    if rss == usize::MAX {
+        None
+    } else {
+        Some(rss)
+    }
 }
 
 /// Generates cryptographically secure random bytes using the Linux `getrandom` system call.
@@ -420,8 +456,8 @@ pub fn rss_self() -> usize {
 /// use os_utils::{rand_bytes, rand_u32, rand_u64};
 /// let mut buffer = vec![0u8; 32];
 /// rand_bytes(&mut buffer).unwrap();
-/// println!("Random u32: {}", rand_u32());
-/// println!("Random u64: {}", rand_u64());
+/// println!("Random u32: {}", rand_u32().unwrap());
+/// println!("Random u64: {}", rand_u64().unwrap());
 /// ```
 #[cfg(target_os = "linux")]
 pub fn rand_bytes(dst: &mut [u8]) -> std::io::Result<()> {
@@ -430,17 +466,31 @@ pub fn rand_bytes(dst: &mut [u8]) -> std::io::Result<()> {
         return Ok(());
     }
 
-    unsafe {
-        // SAFETY: getrandom is a valid system call. The buffer pointer is valid and properly aligned,
-        // the length matches the slice size, and we check the return value to ensure safe usage.
-        let res = libc::getrandom(dst.as_mut_ptr() as *mut libc::c_void, need, 0);
+    let mut filled = 0;
+    while filled < need {
+        let res = unsafe {
+            // SAFETY: `dst[filled..]` is a valid, properly-aligned slice of length
+            // `need - filled` for the duration of the call.
+            libc::getrandom(
+                dst[filled..].as_mut_ptr() as *mut libc::c_void,
+                need - filled,
+                0,
+            )
+        };
         if res < 0 {
-            return Err(std::io::Error::last_os_error());
-        } else if res != need as isize {
-            return Err(std::io::Error::other(format!(
-                "Unable to generate {need} random bytes"
-            )));
+            let err = std::io::Error::last_os_error();
+            // getrandom returns EINTR if interrupted by a signal before any bytes
+            // were written, and EAGAIN very early in boot before the entropy pool
+            // is initialized. Both are transient; retry.
+            if err.raw_os_error() == Some(libc::EINTR) || err.raw_os_error() == Some(libc::EAGAIN)
+            {
+                continue;
+            }
+            return Err(err);
         }
+        filled += res as usize;
+        // getrandom can also return fewer bytes than requested without setting
+        // errno; the loop covers that case naturally on the next iteration.
     }
     Ok(())
 }
@@ -462,8 +512,8 @@ pub fn rand_bytes(dst: &mut [u8]) -> std::io::Result<()> {
 /// use os_utils::{rand_bytes, rand_u32, rand_u64};
 /// let mut buffer = vec![0u8; 32];
 /// rand_bytes(&mut buffer).unwrap();
-/// println!("Random u32: {}", rand_u32());
-/// println!("Random u64: {}", rand_u64());
+/// println!("Random u32: {}", rand_u32().unwrap());
+/// println!("Random u64: {}", rand_u64().unwrap());
 /// ```
 #[cfg(target_os = "macos")]
 pub fn rand_bytes(dst: &mut [u8]) -> std::io::Result<()> {
@@ -486,53 +536,39 @@ pub fn rand_bytes(dst: &mut [u8]) -> std::io::Result<()> {
 /// Generates a cryptographically secure random 32-bit unsigned integer.
 ///
 /// # Returns
-/// A `u32` containing 4 random bytes from the system's secure random number generator.
-///
-/// # Panics
-/// Panics if random byte generation fails.
+/// `Ok(u32)` containing 4 random bytes from the system's secure random number generator,
+/// or an `io::Error` if the underlying RNG call fails (e.g., `ENOSYS` on a kernel
+/// without `getrandom`).
 ///
 /// # Example
 /// ```
-/// let random_num = os_utils::rand_u32();
+/// let random_num = os_utils::rand_u32()?;
 /// println!("Random u32: {}", random_num);
+/// # Ok::<(), std::io::Error>(())
 /// ```
-pub fn rand_u32() -> u32 {
-    let mut buf: [MaybeUninit<u8>; 4] = [MaybeUninit::uninit(); 4];
-    rand_bytes(unsafe {
-        // SAFETY: We're transmuting the uninitialized buffer to a mutable slice of u8.
-        // Since rand_bytes will immediately initialize it, this is safe.
-        std::mem::transmute::<&mut [std::mem::MaybeUninit<u8>], &mut [u8]>(&mut buf[..])
-    })
-    .unwrap();
-    // SAFETY: The buffer has been fully initialized by rand_bytes above, so transmuting
-    // the 4 initialized bytes to u32 is safe.
-    unsafe { std::mem::transmute(buf) }
+pub fn rand_u32() -> std::io::Result<u32> {
+    let mut buf = [0u8; 4];
+    rand_bytes(&mut buf)?;
+    Ok(u32::from_ne_bytes(buf))
 }
 
 /// Generates a cryptographically secure random 64-bit unsigned integer.
 ///
 /// # Returns
-/// A `u64` containing 8 random bytes from the system's secure random number generator.
-///
-/// # Panics
-/// Panics if random byte generation fails.
+/// `Ok(u64)` containing 8 random bytes from the system's secure random number generator,
+/// or an `io::Error` if the underlying RNG call fails (e.g., `ENOSYS` on a kernel
+/// without `getrandom`).
 ///
 /// # Example
 /// ```
-/// let random_num = os_utils::rand_u64();
+/// let random_num = os_utils::rand_u64()?;
 /// println!("Random u64: {}", random_num);
+/// # Ok::<(), std::io::Error>(())
 /// ```
-pub fn rand_u64() -> u64 {
-    let mut buf: [MaybeUninit<u8>; 8] = [MaybeUninit::uninit(); 8];
-    rand_bytes(unsafe {
-        // SAFETY: We're transmuting the uninitialized buffer to a mutable slice of u8.
-        // Since rand_bytes will immediately initialize it, this is safe.
-        std::mem::transmute::<&mut [std::mem::MaybeUninit<u8>], &mut [u8]>(&mut buf[..])
-    })
-    .unwrap();
-    // SAFETY: The buffer has been fully initialized by rand_bytes above, so transmuting
-    // the 8 initialized bytes to u64 is safe.
-    unsafe { std::mem::transmute(buf) }
+pub fn rand_u64() -> std::io::Result<u64> {
+    let mut buf = [0u8; 8];
+    rand_bytes(&mut buf)?;
+    Ok(u64::from_ne_bytes(buf))
 }
 
 /// Returns the system load averages for the past 1, 5, and 15 minutes.
@@ -593,9 +629,13 @@ pub fn getloadavg() -> std::io::Result<[f64; 3]> {
         si.assume_init()
     };
 
-    #[allow(clippy::needless_range_loop)]
-    for i in 0..3 {
-        loadavg[i] = 1.0 / ((1 << libc::SI_LOAD_SHIFT) * si.loads[i]) as f64;
+    // `sysinfo()` reports `loads[i]` as a fixed-point number: the actual load average
+    // is `loads[i] / (1 << SI_LOAD_SHIFT)`. SI_LOAD_SHIFT is 16 on every Linux ABI we
+    // support, but using `1u64 << SI_LOAD_SHIFT` keeps the math correct if that ever
+    // changes. We use u64 to avoid shifting into the sign bit on a 32-bit `c_ulong`.
+    let scale = (1u64 << libc::SI_LOAD_SHIFT) as f64;
+    for (slot, raw) in loadavg.iter_mut().zip(si.loads.iter()) {
+        *slot = *raw as f64 / scale;
     }
 
     Ok(loadavg)
@@ -603,18 +643,28 @@ pub fn getloadavg() -> std::io::Result<[f64; 3]> {
 
 /// Returns disk free information for a given path.
 ///
+/// The first tuple element is the total capacity of the filesystem containing
+/// `path`; the second is the bytes **available to a non-superuser** (i.e. the
+/// `f_bavail` field from `statvfs(3)`, *not* `f_bfree`, which can include
+/// blocks reserved for root). On filesystems where this distinction does not
+/// apply (e.g. most non-UNIX mounts), the two values are equal.
+///
 /// # Arguments
 /// * `path` - The filesystem path to query
 ///
 /// # Returns
-/// * `Ok((capacity_bytes, free_bytes))` - A tuple containing the total capacity and remaining space
-/// * `Err(std::io::Error)` if the system call fails or path is invalid
+/// * `Ok((capacity_bytes, available_bytes))` - A tuple containing the total
+///   capacity and the bytes available to a non-superuser.
+/// * `Err(std::io::Error)` if the system call fails or path is invalid.
 ///
 /// # Example
 /// ```
 /// let (total, free) = os_utils::disk_free("/").unwrap();
-/// println!("Disk free: {} / {} bytes ({:.1}% capacity)",
-///          free, total, ((total - free) as f64 / total as f64) * 100.0);
+/// println!("Disk: {} / {} bytes available to non-root", free, total);
+/// if total > 0 {
+///     let pct_used = ((total - free) as f64 / total as f64) * 100.0;
+///     println!("{:.1}% unavailable to non-root", pct_used);
+/// }
 /// ```
 pub fn disk_free<P: AsRef<Path>>(path: P) -> std::io::Result<(u64, u64)> {
     let path_cstr = CString::new(path.as_ref().as_os_str().as_encoded_bytes())
@@ -672,29 +722,39 @@ impl<T: AsRawFd> TtyInfo for T {
     }
 
     fn ttyname(&self) -> std::io::Result<PathBuf> {
-        const TTY_NAME_MAX: usize = 128;
-        let mut buf = [0u8; TTY_NAME_MAX];
-        let result = unsafe {
-            // SAFETY: We're calling ttyname_r with a valid file descriptor (0)
-            // and a properly allocated buffer with correct size.
-            libc::ttyname_r(
-                self.as_raw_fd(),
-                buf.as_mut_ptr() as *mut libc::c_char,
-                buf.len(),
-            )
-        };
-
-        if result != 0 {
-            return Err(std::io::Error::from_raw_os_error(result));
+        // Start with a small buffer and grow on ERANGE
+        let mut buf = vec![0u8; 256];
+        loop {
+            let result = unsafe {
+                // SAFETY: `buf` is a valid heap allocation of `buf.len()` bytes;
+                // `ttyname_r` writes at most that many bytes including the NUL.
+                libc::ttyname_r(
+                    self.as_raw_fd(),
+                    buf.as_mut_ptr() as *mut libc::c_char,
+                    buf.len(),
+                )
+            };
+            match result {
+                0 => {
+                    let name = unsafe {
+                        // SAFETY: `ttyname_r` returned 0 and writes a NUL-terminated
+                        // string into the buffer on success.
+                        CStr::from_ptr(buf.as_ptr() as *const libc::c_char)
+                    }
+                    .to_bytes();
+                    return Ok(PathBuf::from(OsStr::from_bytes(name)));
+                }
+                libc::ERANGE => {
+                    // Buffer too small; double and retry. Cap at 64 KiB to avoid
+                    // runaway allocation if the kernel is misbehaving.
+                    if buf.len() >= 65536 {
+                        return Err(std::io::Error::from_raw_os_error(libc::ERANGE));
+                    }
+                    buf.resize(buf.len() * 2, 0);
+                }
+                other => return Err(std::io::Error::from_raw_os_error(other)),
+            }
         }
-
-        let name = unsafe {
-            // SAFETY: ttyname_r guarantees a null-terminated string on success.
-            CStr::from_ptr(buf.as_ptr() as *const libc::c_char)
-        }
-        .to_bytes();
-
-        Ok(PathBuf::from(OsStr::from_bytes(name)))
     }
 }
 
@@ -718,20 +778,23 @@ impl AsRawFd for Stdin {
 
 impl std::io::Read for Stdin {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let result = unsafe {
-            // SAFETY: We're calling libc::read with a valid file descriptor (0 for stdin)
-            // and a properly allocated buffer with correct length.
-            libc::read(
-                libc::STDIN_FILENO,
-                buf.as_mut_ptr() as *mut libc::c_void,
-                buf.len(),
-            )
-        };
-
-        if result < 0 {
-            Err(std::io::Error::last_os_error())
-        } else {
-            Ok(result as usize)
+        loop {
+            let result = unsafe {
+                // SAFETY: `buf` is a valid, properly-aligned slice for the call.
+                libc::read(
+                    libc::STDIN_FILENO,
+                    buf.as_mut_ptr() as *mut libc::c_void,
+                    buf.len(),
+                )
+            };
+            if result < 0 {
+                let err = std::io::Error::last_os_error();
+                if err.raw_os_error() == Some(libc::EINTR) {
+                    continue;
+                }
+                return Err(err);
+            }
+            return Ok(result as usize);
         }
     }
 
@@ -739,7 +802,7 @@ impl std::io::Read for Stdin {
         let result = unsafe {
             libc::readv(
                 libc::STDIN_FILENO,
-                bufs.as_mut_ptr() as *mut libc::iovec as *const libc::iovec,
+                bufs.as_ptr().cast::<libc::iovec>(),
                 std::cmp::min(bufs.len(), max_iov()) as libc::c_int,
             )
         };
@@ -784,21 +847,27 @@ impl AsRawFd for Stdout {
 
 impl std::io::Write for Stdout {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let result = unsafe {
-            // SAFETY: We're calling libc::write with a valid file descriptor (1 for stdout)
-            // and a properly allocated buffer with correct length.
-            libc::write(
-                libc::STDOUT_FILENO,
-                buf.as_ptr() as *const libc::c_void,
-                buf.len(),
-            )
-        };
-
-        if result < 0 {
-            Err(std::io::Error::last_os_error())
-        } else {
-            Ok(result as usize)
+        let mut written = 0;
+        while written < buf.len() {
+            let result = unsafe {
+                // SAFETY: `buf[written..]` is a valid, properly-aligned slice for the
+                // duration of the call.
+                libc::write(
+                    libc::STDOUT_FILENO,
+                    buf[written..].as_ptr().cast::<libc::c_void>(),
+                    buf.len() - written,
+                )
+            };
+            if result < 0 {
+                let err = std::io::Error::last_os_error();
+                if err.raw_os_error() == Some(libc::EINTR) {
+                    continue;
+                }
+                return Err(err);
+            }
+            written += result as usize;
         }
+        Ok(written)
     }
 
     fn write_vectored(&mut self, bufs: &[IoSlice<'_>]) -> std::io::Result<usize> {
@@ -817,8 +886,8 @@ impl std::io::Write for Stdout {
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        // File descriptors don't buffer in the same way as stdio,
-        // but we can ensure data is written to the OS.
+        // Unbuffered: writes go straight to fd 1, so there's nothing to flush.
+        // This is a no-op that satisfies the `Write` trait contract.
         Ok(())
     }
 }
@@ -849,21 +918,27 @@ impl AsRawFd for Stderr {
 
 impl std::io::Write for Stderr {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let result = unsafe {
-            // SAFETY: We're calling libc::write with a valid file descriptor (2 for stderr)
-            // and a properly allocated buffer with correct length.
-            libc::write(
-                libc::STDERR_FILENO,
-                buf.as_ptr() as *const libc::c_void,
-                buf.len(),
-            )
-        };
-
-        if result < 0 {
-            Err(std::io::Error::last_os_error())
-        } else {
-            Ok(result as usize)
+        let mut written = 0;
+        while written < buf.len() {
+            let result = unsafe {
+                // SAFETY: `buf[written..]` is a valid, properly-aligned slice for the
+                // duration of the call.
+                libc::write(
+                    libc::STDERR_FILENO,
+                    buf[written..].as_ptr().cast::<libc::c_void>(),
+                    buf.len() - written,
+                )
+            };
+            if result < 0 {
+                let err = std::io::Error::last_os_error();
+                if err.raw_os_error() == Some(libc::EINTR) {
+                    continue;
+                }
+                return Err(err);
+            }
+            written += result as usize;
         }
+        Ok(written)
     }
 
     fn write_vectored(&mut self, bufs: &[IoSlice<'_>]) -> std::io::Result<usize> {
@@ -882,8 +957,8 @@ impl std::io::Write for Stderr {
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        // File descriptors don't buffer in the same way as stdio,
-        // but we can ensure data is written to the OS.
+        // Unbuffered: writes go straight to fd 2, so there's nothing to flush.
+        // This is a no-op that satisfies the `Write` trait contract.
         Ok(())
     }
 }
@@ -914,8 +989,9 @@ impl Default for Stderr {
 ///
 /// # Errors
 ///
-/// The `TryRng` trait methods return `Result<T, Infallible>`, meaning they never fail.
-/// Any underlying OS errors are handled by panicking in the [`rand_bytes`] function.
+/// `TryRng::Error` is `std::io::Error`, so an underlying OS failure (such as
+/// `getrandom` returning `ENOSYS` on a pre-3.17 Linux kernel) is surfaced
+/// through the trait's `Result` return type rather than panicking.
 ///
 /// # Examples
 ///
@@ -941,19 +1017,18 @@ pub struct OsRng;
 
 #[cfg(feature = "rand")]
 impl rand_core::TryRng for OsRng {
-    type Error = core::convert::Infallible;
+    type Error = std::io::Error;
 
     fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
-        Ok(rand_u32())
+        rand_u32()
     }
 
     fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
-        Ok(rand_u64())
+        rand_u64()
     }
 
     fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
-        rand_bytes(dst).expect("failed to generate random bytes");
-        Ok(())
+        rand_bytes(dst)
     }
 }
 
@@ -1065,7 +1140,64 @@ mod tests {
 
     #[test]
     fn test_uptime_proc() {
+        // Sleep so the test process has measurable uptime. Without this, very fast
+        // test runners can spawn the process in the same kernel tick that
+        // /proc/uptime is sampled, returning `Duration::ZERO`.
+        std::thread::sleep(std::time::Duration::from_millis(10));
         assert_ne!(uptime_proc(std::process::id()), Duration::ZERO);
+    }
+
+    /// Cross-check `uptime_proc` against an in-process Rust reimplementation that
+    /// reads the same `/proc/<pid>/stat` field 22 and `/proc/uptime` independently.
+    /// Tolerates a few ms of jitter between the two samples.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_uptime_proc_matches_proc() {
+        use std::fs;
+
+        fn parse_self_uptime_ns() -> Option<u128> {
+            let pid = std::process::id();
+            let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+            let rparen = stat.rfind(')')?;
+            let mut field = 2u32;
+            let mut idx = rparen + 1;
+            let bytes = stat.as_bytes();
+            while field < 22 && idx < bytes.len() {
+                if bytes[idx] == b' ' {
+                    field += 1;
+                    if field == 22 {
+                        idx += 1;
+                        break;
+                    }
+                }
+                idx += 1;
+            }
+            if field != 22 {
+                return None;
+            }
+            let rest = stat[idx..].trim_start();
+            let end = rest
+                .find(|c: char| c.is_whitespace())
+                .unwrap_or(rest.len());
+            let start_ticks: f64 = rest[..end].parse().ok()?;
+            let clk_tck = unsafe { libc::sysconf(libc::_SC_CLK_TCK) } as f64;
+            let uptime_secs: f64 = fs::read_to_string("/proc/uptime")
+                .ok()?
+                .split_whitespace()
+                .next()?
+                .parse()
+                .ok()?;
+            Some(((uptime_secs - start_ticks / clk_tck) * 1e9) as u128)
+        }
+
+        let ours = uptime_proc(std::process::id()).as_nanos();
+        let reference = parse_self_uptime_ns().expect("failed to read /proc reference");
+        let diff = (ours as i128 - reference as i128).unsigned_abs();
+        const TOLERANCE_NS: u128 = 50_000_000; // 50 ms
+        assert!(
+            diff < TOLERANCE_NS,
+            "uptime_proc(self) diverges from /proc reference: ours={ours} ns, reference={reference} ns, diff={diff} ns (tolerance {TOLERANCE_NS} ns)",
+        );
     }
 
     #[test]
@@ -1089,6 +1221,62 @@ mod tests {
         assert!(avg[2] > 0.0);
     }
 
+    /// Regression test: on Linux, `getloadavg()` must match the values exposed by the
+    /// kernel in `/proc/loadavg` (within rounding). The kernel reports load averages as
+    /// fixed-point integers scaled by `1 << SI_LOAD_SHIFT` (16), so this also locks in
+    /// the conversion factor going forward.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_getloadavg_matches_proc_loadavg() {
+        use std::fs;
+
+        // `/proc/loadavg` line 1 has the form: "1.00 0.50 0.25 1/123 4567"
+        // We only care about the first three whitespace-separated fields.
+        let raw = fs::read_to_string("/proc/loadavg").expect("failed to read /proc/loadavg");
+        let mut fields = raw.split_whitespace();
+        let proc_one: f64 = fields
+            .next()
+            .expect("missing 1-minute field")
+            .parse()
+            .expect("1-minute field is not numeric");
+        let proc_five: f64 = fields
+            .next()
+            .expect("missing 5-minute field")
+            .parse()
+            .expect("5-minute field is not numeric");
+        let proc_fifteen: f64 = fields
+            .next()
+            .expect("missing 15-minute field")
+            .parse()
+            .expect("15-minute field is not numeric");
+        let proc_avg = [proc_one, proc_five, proc_fifteen];
+
+        let our_avg = getloadavg().expect("getloadavg() failed");
+
+        // The kernel updates both sources periodically (typically every 5 s), so the
+        // samples may be taken in slightly different reporting windows. A tolerance of
+        // half the smallest representable unit (`1 / (1 << SI_LOAD_SHIFT) ≈ 1.5e-5`)
+        // would be too tight; we use a small fixed epsilon that comfortably covers one
+        // tick of jitter between the two samples while still catching the
+        // `1.0 / load` inversion bug (which would produce values in `[0, 1]` rather than
+        // matching `proc_avg`).
+        const EPSILON: f64 = 0.01;
+        for (i, (ours, theirs)) in our_avg.iter().zip(proc_avg.iter()).enumerate() {
+            let label = match i {
+                0 => "1-minute",
+                1 => "5-minute",
+                2 => "15-minute",
+                _ => unreachable!(),
+            };
+            assert!(
+                (ours - theirs).abs() < EPSILON,
+                "{label} loadavg mismatch: ours={ours}, /proc/loadavg={theirs}, \
+                 delta={} (tolerance {EPSILON})",
+                (ours - theirs).abs(),
+            );
+        }
+    }
+
     #[test]
     fn test_rss_self() {
         let rss = rss_self();
@@ -1098,16 +1286,16 @@ mod tests {
     #[test]
     fn test_rand_u32() {
         // Test that two consecutive u32 values are different
-        let v1 = rand_u32();
-        let v2 = rand_u32();
+        let v1 = rand_u32().unwrap();
+        let v2 = rand_u32().unwrap();
         assert_ne!(v1, v2);
     }
 
     #[test]
     fn test_rand_u64() {
         // Test that two consecutive u64 values are different
-        let v1 = rand_u64();
-        let v2 = rand_u64();
+        let v1 = rand_u64().unwrap();
+        let v2 = rand_u64().unwrap();
         assert_ne!(v1, v2);
     }
 
@@ -1134,5 +1322,61 @@ mod tests {
         // Test with invalid path
         let result = disk_free("/nonexistent/path/that/does/not/exist");
         assert!(result.is_err(), "Should fail for non-existent path");
+    }
+
+    /// Cross-check `disk_free` against `df -B1`. Both ultimately call `statvfs(3)`,
+    /// so values should match exactly — any drift is bounded by allocations or
+    /// frees between the two samples. Skipped silently if `df` is unavailable.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_disk_free_matches_df() {
+        use std::process::Command;
+
+        // `df -B1` emits: Filesystem 1B-blocks Used Available Use% Mounted
+        let df = Command::new("df")
+            .args(["-B1", "/"])
+            .output()
+            .expect("failed to spawn df");
+        let stdout = String::from_utf8_lossy(&df.stdout);
+        let line = match stdout.lines().nth(1) {
+            Some(l) => l,
+            None => {
+                eprintln!("skipping: df produced no data line");
+                return;
+            }
+        };
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.len() < 4 {
+            eprintln!("skipping: unexpected df output format: {line:?}");
+            return;
+        }
+        let df_total: u64 = match fields[1].parse() {
+            Ok(n) => n,
+            Err(_) => {
+                eprintln!("skipping: could not parse df total");
+                return;
+            }
+        };
+        let df_avail: u64 = match fields[3].parse() {
+            Ok(n) => n,
+            Err(_) => {
+                eprintln!("skipping: could not parse df avail");
+                return;
+            }
+        };
+
+        let (total, avail) = disk_free("/").expect("disk_free(/) failed");
+
+        // Allow up to 1 MiB of drift to absorb allocations between the two samples.
+        // On a quiet test machine the drift is usually a few hundred KiB.
+        const TOLERANCE: u64 = 1024 * 1024;
+        let total_diff = total.abs_diff(df_total);
+        let avail_diff = avail.abs_diff(df_avail);
+        assert!(
+            total_diff < TOLERANCE && avail_diff < TOLERANCE,
+            "disk_free diverges from df -B1:\n  ours total={total} df total={df_total} diff={total_diff}\n  \
+             ours avail={avail} df avail={df_avail} diff={avail_diff}\n  \
+             (tolerance {TOLERANCE})",
+        );
     }
 }

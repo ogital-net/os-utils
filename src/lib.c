@@ -58,7 +58,8 @@ size_t rss_self_c(void)
 
 #include <limits.h>
 #include <stdio.h>
-#include <sys/stat.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/sysinfo.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -73,24 +74,93 @@ uint64_t uptime_sys_c(void)
 
 uint64_t uptime_proc_c(pid_t pid)
 {
-    char path[PATH_MAX];
-    struct stat sb;
-    struct timespec current_time;
-    uint64_t currrent_nanos, proc_nanos;
+    char path[64];
+    char buf[4096];
+    FILE *fp;
+    char *lparen, *rparen;
+    unsigned long long start_ticks;
+    long sc_clk_tck;
 
-    snprintf(path, sizeof(path), "/proc/%d", pid);
-
-    if (stat(path, &sb) == -1)
+    /* /proc/<pid>/stat: "pid (comm) state ppid ..."; field 22 is starttime in clock
+     * ticks since boot. comm may contain spaces or ')', so split on the last ')'. */
+    snprintf(path, sizeof(path), "/proc/%d/stat", (int)pid);
+    fp = fopen(path, "r");
+    if (fp == NULL)
     {
         return 0;
     }
-    clock_gettime(CLOCK_MONOTONIC, &current_time);
-    currrent_nanos = (uint64_t)current_time.tv_sec * 1000000000 + current_time.tv_nsec;
-    proc_nanos = (uint64_t)sb.st_ctim.tv_sec * 1000000000 + sb.st_ctim.tv_nsec;
+    if (fgets(buf, sizeof(buf), fp) == NULL)
+    {
+        fclose(fp);
+        return 0;
+    }
+    fclose(fp);
 
-    return currrent_nanos - proc_nanos;
+    rparen = strrchr(buf, ')');
+    if (rparen == NULL)
+    {
+        return 0;
+    }
+    lparen = strchr(buf, '(');
+    if (lparen == NULL || lparen > rparen)
+    {
+        return 0;
+    }
+    /* /proc/<pid>/stat: "pid (comm) state ppid ...". `rparen` ends field 2 (comm);
+     * the first byte after it is the space between field 2 and field 3. Walk
+     * forward, counting whitespace-separated fields, until we reach field 22
+     * (starttime). After the loop, `p` is the first byte of the field value. */
+    {
+        char *p = rparen + 1;
+        int field = 2;
+        while (field < 22 && *p != '\0')
+        {
+            if (*p == ' ')
+            {
+                field++;
+                if (field == 22)
+                {
+                    p++;
+                    break;
+                }
+            }
+            p++;
+        }
+        if (field != 22 || *p == '\0' || sscanf(p, "%llu", &start_ticks) != 1)
+        {
+            return 0;
+        }
+    }
+
+    sc_clk_tck = sysconf(_SC_CLK_TCK);
+    if (sc_clk_tck <= 0)
+    {
+        return 0;
+    }
+
+    /* System uptime in seconds from /proc/uptime (first whitespace-separated field). */
+    {
+        double uptime_secs = 0.0;
+        fp = fopen("/proc/uptime", "r");
+        if (fp == NULL)
+        {
+            return 0;
+        }
+        if (fscanf(fp, "%lf", &uptime_secs) != 1)
+        {
+            fclose(fp);
+            return 0;
+        }
+        fclose(fp);
+        /* uptime - start_ticks/CLK_TCK, expressed in nanoseconds. */
+        return (uint64_t)((uptime_secs - (double)start_ticks / (double)sc_clk_tck) * 1e9);
+    }
 }
 
+/* Returns the resident set size in bytes, or SIZE_MAX on error. The success
+ * path produces at least _SC_PAGESIZE bytes (any running process has at
+ * least one resident page from the kernel's own bookkeeping), so SIZE_MAX
+ * is unambiguous as an error indicator. */
 size_t rss_self_c(void)
 {
     FILE *fp;
@@ -100,18 +170,22 @@ size_t rss_self_c(void)
     fp = fopen("/proc/self/statm", "r");
     if (fp == NULL)
     {
-        return 0;
+        return SIZE_MAX;
     }
 
     if (fscanf(fp, "%*u %zu", &rss_pages) != 1)
     {
         fclose(fp);
-        return 0;
+        return SIZE_MAX;
     }
 
     fclose(fp);
 
     page_size = sysconf(_SC_PAGESIZE);
+    if (page_size <= 0)
+    {
+        return SIZE_MAX;
+    }
     return rss_pages * page_size;
 }
 #endif

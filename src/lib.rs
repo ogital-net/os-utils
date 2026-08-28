@@ -480,8 +480,7 @@ pub fn rand_bytes(dst: &mut [u8]) -> std::io::Result<()> {
             // getrandom returns EINTR if interrupted by a signal before any bytes
             // were written, and EAGAIN very early in boot before the entropy pool
             // is initialized. Both are transient; retry.
-            if err.raw_os_error() == Some(libc::EINTR) || err.raw_os_error() == Some(libc::EAGAIN)
-            {
+            if err.raw_os_error() == Some(libc::EINTR) || err.raw_os_error() == Some(libc::EAGAIN) {
                 continue;
             }
             return Err(err);
@@ -1278,9 +1277,7 @@ mod tests {
                 return None;
             }
             let rest = stat[idx..].trim_start();
-            let end = rest
-                .find(|c: char| c.is_whitespace())
-                .unwrap_or(rest.len());
+            let end = rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len());
             let start_ticks: f64 = rest[..end].parse().ok()?;
             let clk_tck = unsafe { libc::sysconf(libc::_SC_CLK_TCK) } as f64;
             let uptime_secs: f64 = fs::read_to_string("/proc/uptime")

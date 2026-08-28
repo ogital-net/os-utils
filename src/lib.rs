@@ -355,7 +355,7 @@ pub fn uptime_sys() -> Duration {
 /// Returns the uptime of a specific process.
 ///
 /// # Arguments
-/// * `id` - Process ID to get the uptime for. Must fit in an `i32` (i.e. ≤ 2^31 − 1),
+/// * `id` - Process ID to get the uptime for. Must fit in an `i32` (i.e. <= 2^31 - 1),
 ///   matching the OS-level `pid_t` width on supported platforms. Larger values
 ///   return an `InvalidInput` error rather than silently wrapping to a negative
 ///   PID that would be rejected by the kernel.
@@ -426,11 +426,9 @@ pub fn rss_self() -> usize {
 /// }
 /// ```
 pub fn rss_self_opt() -> Option<usize> {
-    // `rss_self_c` returns `usize::MAX` to signal "could not measure" (e.g.
-    // /proc/self/statm unreadable, fscanf parse failure, or sysconf returning
-    // a non-positive page size). A real running process always has at least
-    // one resident page, so the success path produces at least `_SC_PAGESIZE`
-    // bytes — never 0 and never anywhere near usize::MAX on any real hardware.
+    // rss_self_c returns usize::MAX to signal "could not measure". A running
+    // process always has at least one resident page, so the success path is
+    // at least _SC_PAGESIZE bytes -- never 0 and never near usize::MAX.
     let rss = unsafe { rss_self_c() };
     if rss == usize::MAX {
         None
@@ -1138,6 +1136,41 @@ mod tests {
         assert_ne!(uptime_sys(), Duration::ZERO);
     }
 
+    /// Cross-check `uptime_sys()` against an independent kernel source of
+    /// boot time: `/proc/stat`'s `btime` field on Linux and
+    /// `sysctl -n kern.boottime` on macOS. Both are epoch-relative seconds,
+    /// so `time.time() - boot` matches `uptime_sys()` within tolerance.
+    #[test]
+    fn test_uptime_sys_matches_boot_time() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is before the Unix epoch")
+            .as_secs_f64();
+
+        let boot_secs: f64 = read_boot_time_secs().expect("could not determine boot time");
+
+        let expected = now - boot_secs;
+        let ours = uptime_sys().as_secs_f64();
+
+        // The shell-side sample and the FFI call are not taken at the same
+        // instant, and `sysctl kern.boottime` reports whole seconds.
+        const TOLERANCE: f64 = 60.0;
+        assert!(
+            (ours - expected).abs() < TOLERANCE,
+            "uptime_sys() = {ours:.3} s diverges from boot-time reference = {expected:.3} s \
+             (delta = {:.3} s, tolerance = {TOLERANCE} s)",
+            (ours - expected).abs(),
+        );
+        // Bound: anything beyond a human lifespan indicates a unit mix-up.
+        const MAX_PLAUSIBLE: f64 = 100.0 * 365.25 * 24.0 * 3600.0;
+        assert!(
+            ours < MAX_PLAUSIBLE,
+            "uptime_sys() = {ours:.3} s exceeds {MAX_PLAUSIBLE:.0} s",
+        );
+    }
+
     #[test]
     fn test_uptime_proc() {
         // Sleep so the test process has measurable uptime. Without this, very fast
@@ -1145,6 +1178,75 @@ mod tests {
         // /proc/uptime is sampled, returning `Duration::ZERO`.
         std::thread::sleep(std::time::Duration::from_millis(10));
         assert_ne!(uptime_proc(std::process::id()), Duration::ZERO);
+    }
+
+    /// Cross-check `uptime_proc(self)` against `ps -o etime=`. `ps` reads the
+    /// same kernel data (`KERN_PROC_PID` on macOS, `/proc/<pid>/stat` field
+    /// 22 on Linux), so the two values match within a second of jitter.
+    /// `etime` format is `[[DD-]HH:]MM:SS`.
+    #[test]
+    fn test_uptime_proc_matches_ps() {
+        use std::process::Command;
+
+        // One second of uptime so `etime` is at least `00:01` and integer
+        // rounding can't trip the parser.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+
+        let pid = std::process::id();
+        let output = Command::new("ps")
+            .args(["-o", "etime=", "-p", &pid.to_string()])
+            .output()
+            .expect("failed to spawn ps");
+        let etime = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let ps_secs = match parse_ps_etime(&etime) {
+            Some(s) => s,
+            None => {
+                eprintln!("skipping: could not parse ps etime = {etime:?}");
+                return;
+            }
+        };
+
+        let ours = uptime_proc(pid).as_secs_f64();
+        const TOLERANCE: f64 = 2.0;
+        assert!(
+            (ours - ps_secs).abs() < TOLERANCE,
+            "uptime_proc(self) = {ours:.3} s diverges from `ps -o etime=` = {ps_secs:.3} s \
+             (delta = {:.3} s, tolerance = {TOLERANCE} s)",
+            (ours - ps_secs).abs(),
+        );
+    }
+
+    /// Cross-check `rss_self()` against `ps -o rss=`. `ps` reports RSS in
+    /// KiB on both Linux and macOS; we multiply by 1024 to normalize.
+    #[test]
+    fn test_rss_self_matches_ps() {
+        use std::process::Command;
+
+        let pid = std::process::id();
+        let output = Command::new("ps")
+            .args(["-o", "rss=", "-p", &pid.to_string()])
+            .output()
+            .expect("failed to spawn ps");
+        let rss_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let rss_raw: u64 = match rss_str.parse() {
+            Ok(n) => n,
+            Err(_) => {
+                eprintln!("skipping: could not parse ps rss = {rss_str:?}");
+                return;
+            }
+        };
+        let ps_bytes = rss_raw * 1024;
+        let ours = rss_self();
+        let ps_bytes_usize = usize::try_from(ps_bytes).expect("ps rss exceeds usize");
+
+        // RSS fluctuates by a few pages between the two samples.
+        const TOLERANCE_BYTES: usize = 1024 * 1024;
+        let diff = ours.abs_diff(ps_bytes_usize);
+        assert!(
+            diff < TOLERANCE_BYTES,
+            "rss_self() = {ours} B diverges from `ps -o rss=` = {ps_bytes} B \
+             (delta = {diff} B, tolerance = {TOLERANCE_BYTES} B)",
+        );
     }
 
     /// Cross-check `uptime_proc` against an in-process Rust reimplementation that
@@ -1202,15 +1304,26 @@ mod tests {
 
     #[test]
     fn test_rand_bytes() {
-        let mut buf1 = vec![0u8; 32];
-        let mut buf2 = vec![0u8; 32];
+        // Empty slice is a no-op success.
+        let mut empty = [];
+        assert!(rand_bytes(&mut empty).is_ok());
 
-        // Test successful generation
-        assert!(rand_bytes(&mut buf1).is_ok());
-        assert!(rand_bytes(&mut buf2).is_ok());
-
-        // Test that two consecutive calls produce different bytes
-        assert_ne!(buf1, buf2);
+        // Sample at several sizes. Each call succeeds, is not all zero, and
+        // differs from the previous sample.
+        for &size in &[4usize, 32, 4096] {
+            let mut prev = vec![0u8; size];
+            rand_bytes(&mut prev).expect("rand_bytes should succeed");
+            assert!(
+                prev.iter().any(|&b| b != 0),
+                "rand_bytes({size}) returned all zeros",
+            );
+            let mut cur = vec![0u8; size];
+            rand_bytes(&mut cur).expect("rand_bytes should succeed");
+            assert_ne!(
+                prev, cur,
+                "two consecutive rand_bytes({size}) calls returned identical buffers",
+            );
+        }
     }
 
     #[test]
@@ -1221,17 +1334,15 @@ mod tests {
         assert!(avg[2] > 0.0);
     }
 
-    /// Regression test: on Linux, `getloadavg()` must match the values exposed by the
-    /// kernel in `/proc/loadavg` (within rounding). The kernel reports load averages as
-    /// fixed-point integers scaled by `1 << SI_LOAD_SHIFT` (16), so this also locks in
-    /// the conversion factor going forward.
+    /// Cross-check `getloadavg()` against `/proc/loadavg` on Linux. The
+    /// kernel reports load averages as fixed-point integers scaled by
+    /// `1 << SI_LOAD_SHIFT` (16); this test confirms the conversion factor.
     #[cfg(target_os = "linux")]
     #[test]
     fn test_getloadavg_matches_proc_loadavg() {
         use std::fs;
 
         // `/proc/loadavg` line 1 has the form: "1.00 0.50 0.25 1/123 4567"
-        // We only care about the first three whitespace-separated fields.
         let raw = fs::read_to_string("/proc/loadavg").expect("failed to read /proc/loadavg");
         let mut fields = raw.split_whitespace();
         let proc_one: f64 = fields
@@ -1253,13 +1364,8 @@ mod tests {
 
         let our_avg = getloadavg().expect("getloadavg() failed");
 
-        // The kernel updates both sources periodically (typically every 5 s), so the
-        // samples may be taken in slightly different reporting windows. A tolerance of
-        // half the smallest representable unit (`1 / (1 << SI_LOAD_SHIFT) ≈ 1.5e-5`)
-        // would be too tight; we use a small fixed epsilon that comfortably covers one
-        // tick of jitter between the two samples while still catching the
-        // `1.0 / load` inversion bug (which would produce values in `[0, 1]` rather than
-        // matching `proc_avg`).
+        // The kernel updates both sources periodically, so the two samples
+        // may be in slightly different reporting windows.
         const EPSILON: f64 = 0.01;
         for (i, (ours, theirs)) in our_avg.iter().zip(proc_avg.iter()).enumerate() {
             let label = match i {
@@ -1283,17 +1389,39 @@ mod tests {
         assert!(rss > 0, "RSS should be greater than 0");
     }
 
+    /// 1024 distinct samples -- collision probability ~5e-7 in a working RNG.
+    #[test]
+    fn test_rand_u32_unique_across_many_samples() {
+        const N: usize = 1024;
+        let mut seen = std::collections::HashSet::with_capacity(N);
+        for _ in 0..N {
+            let v = rand_u32().expect("rand_u32 should succeed");
+            assert!(seen.insert(v), "rand_u32 returned a duplicate value {v}");
+        }
+        assert_eq!(seen.len(), N);
+    }
+
     #[test]
     fn test_rand_u32() {
-        // Test that two consecutive u32 values are different
         let v1 = rand_u32().unwrap();
         let v2 = rand_u32().unwrap();
         assert_ne!(v1, v2);
     }
 
+    /// 1024 distinct samples.
+    #[test]
+    fn test_rand_u64_unique_across_many_samples() {
+        const N: usize = 1024;
+        let mut seen = std::collections::HashSet::with_capacity(N);
+        for _ in 0..N {
+            let v = rand_u64().expect("rand_u64 should succeed");
+            assert!(seen.insert(v), "rand_u64 returned a duplicate value {v}");
+        }
+        assert_eq!(seen.len(), N);
+    }
+
     #[test]
     fn test_rand_u64() {
-        // Test that two consecutive u64 values are different
         let v1 = rand_u64().unwrap();
         let v2 = rand_u64().unwrap();
         assert_ne!(v1, v2);
@@ -1324,9 +1452,9 @@ mod tests {
         assert!(result.is_err(), "Should fail for non-existent path");
     }
 
-    /// Cross-check `disk_free` against `df -B1`. Both ultimately call `statvfs(3)`,
-    /// so values should match exactly — any drift is bounded by allocations or
-    /// frees between the two samples. Skipped silently if `df` is unavailable.
+    /// Cross-check `disk_free` against `df -B1`. Both call `statvfs(3)`,
+    /// so values match within a small drift bounded by allocations between
+    /// samples. Skipped silently if `df` is unavailable.
     #[cfg(target_os = "linux")]
     #[test]
     fn test_disk_free_matches_df() {
@@ -1378,5 +1506,62 @@ mod tests {
              ours avail={avail} df avail={df_avail} diff={avail_diff}\n  \
              (tolerance {TOLERANCE})",
         );
+    }
+
+    /// Returns the system boot time in seconds since the Unix epoch, or
+    /// `None` if it can't be read on this platform.
+    fn read_boot_time_secs() -> Option<f64> {
+        #[cfg(target_os = "linux")]
+        {
+            // /proc/stat contains `btime <unix_secs>`.
+            let raw = std::fs::read_to_string("/proc/stat").ok()?;
+            for line in raw.lines() {
+                if let Some(rest) = line.strip_prefix("btime ") {
+                    return rest.trim().parse().ok();
+                }
+            }
+            None
+        }
+        #[cfg(target_os = "macos")]
+        {
+            // `sysctl -n kern.boottime` prints `{ sec = N, usec = N } ...`.
+            let output = std::process::Command::new("sysctl")
+                .args(["-n", "kern.boottime"])
+                .output()
+                .ok()?;
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let sec_start = stdout.find("sec = ")? + "sec = ".len();
+            let after_sec = &stdout[sec_start..];
+            let sec_end = after_sec
+                .find(|c: char| !c.is_ascii_digit())
+                .unwrap_or(after_sec.len());
+            // usec is fractional and contributes at most 1 second; ignore.
+            after_sec[..sec_end].parse().ok()
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            None
+        }
+    }
+
+    /// Parses the `[[DD-]HH:]MM:SS` format produced by `ps -o etime=`.
+    fn parse_ps_etime(s: &str) -> Option<f64> {
+        let mut parts: Vec<&str> = s.split(':').collect();
+        if parts.len() < 2 || parts.len() > 3 {
+            return None;
+        }
+        let seconds: f64 = parts.pop()?.parse().ok()?;
+        let minutes: f64 = parts.pop()?.parse().ok()?;
+        let (hours, days) = if let Some(rest) = parts.pop() {
+            // Could be `HH` or `DD-HH`.
+            if let Some((d, h)) = rest.split_once('-') {
+                (h.parse().ok()?, d.parse().ok()?)
+            } else {
+                (rest.parse().ok()?, 0.0)
+            }
+        } else {
+            (0.0, 0.0)
+        };
+        Some(days * 86400.0 + hours * 3600.0 + minutes * 60.0 + seconds)
     }
 }

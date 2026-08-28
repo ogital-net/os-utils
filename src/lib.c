@@ -20,7 +20,7 @@ uint64_t uptime_proc_c(pid_t pid)
     size_t size = sizeof(proc_info);
     int32_t mib[4];
     struct timespec current_time;
-    uint64_t currrent_nanos, proc_nanos;
+    uint64_t current_nanos, proc_nanos;
 
     mib[0] = CTL_KERN;
     mib[1] = KERN_PROC;
@@ -32,11 +32,19 @@ uint64_t uptime_proc_c(pid_t pid)
         return 0;
     }
 
-    clock_gettime(CLOCK_MONOTONIC_RAW, &current_time);
-    currrent_nanos = (uint64_t)current_time.tv_sec * 1000000000 + current_time.tv_nsec;
+    /* p_starttime is wall-clock seconds since the epoch (see ps -o lstart).
+     * Sample the current time in the same domain with CLOCK_REALTIME;
+     * CLOCK_MONOTONIC_RAW is time since boot and would wrap. */
+    clock_gettime(CLOCK_REALTIME, &current_time);
+    current_nanos = (uint64_t)current_time.tv_sec * 1000000000 + current_time.tv_nsec;
     proc_nanos = ((uint64_t)proc_info.kp_proc.p_starttime.tv_sec * 1000000 + proc_info.kp_proc.p_starttime.tv_usec) * 1000;
 
-    return currrent_nanos - proc_nanos;
+    /* Defensive: return 0 if starttime is in the future (clock skew). */
+    if (current_nanos <= proc_nanos)
+    {
+        return 0;
+    }
+    return current_nanos - proc_nanos;
 }
 
 size_t rss_self_c(void)

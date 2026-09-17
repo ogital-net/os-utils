@@ -146,12 +146,22 @@ fn main() {
 use os_utils::disk_free;
 
 fn main() -> std::io::Result<()> {
-    let (total, free) = disk_free("/")?;
+    let usage = disk_free("/")?;
     println!("Disk free: {} / {} bytes ({:.1}% used)",
-             free, total, ((total - free) as f64 / total as f64) * 100.0);
+             usage.available_bytes(),
+             usage.total_bytes(),
+             (usage.used_bytes() as f64
+                 / (usage.used_bytes() as f64 + usage.available_bytes() as f64)) * 100.0);
+    println!("Inodes available: {} / {}",
+             usage.available_inodes(), usage.total_inodes());
     Ok(())
 }
 ```
+
+`free_bytes()` includes space reserved for privileged users, while
+`available_bytes()` reports the space an unprivileged user can allocate.
+On macOS, `used_bytes()` uses `ATTR_VOL_SPACEUSED` so APFS usage matches `df`;
+other platforms derive it from total and free space.
 
 ### Resident Set Size
 

@@ -638,32 +638,147 @@ pub fn getloadavg() -> std::io::Result<[f64; 3]> {
     Ok(loadavg)
 }
 
+/// Space and inode usage for a filesystem.
+///
+/// The `free` values include resources reserved for privileged users, while
+/// the `available` values report what unprivileged users can allocate.
+/// Returned by [`disk_free`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DiskUsage {
+    total_bytes: u64,
+    used_bytes: u64,
+    free_bytes: u64,
+    available_bytes: u64,
+    total_inodes: u64,
+    free_inodes: u64,
+    available_inodes: u64,
+}
+
+impl DiskUsage {
+    /// Returns the total filesystem capacity in bytes.
+    #[must_use]
+    pub const fn total_bytes(&self) -> u64 {
+        self.total_bytes
+    }
+
+    /// Returns the number of free bytes, including space reserved for
+    /// privileged users.
+    #[must_use]
+    pub const fn free_bytes(&self) -> u64 {
+        self.free_bytes
+    }
+
+    /// Returns the number of bytes available to unprivileged users.
+    #[must_use]
+    pub const fn available_bytes(&self) -> u64 {
+        self.available_bytes
+    }
+
+    /// Returns the number of bytes in use.
+    ///
+    /// On macOS this uses the volume's `ATTR_VOL_SPACEUSED` value, matching
+    /// `df` for filesystems such as APFS whose volumes share container space.
+    /// Other platforms derive this as `total_bytes - free_bytes`.
+    #[must_use]
+    pub const fn used_bytes(&self) -> u64 {
+        self.used_bytes
+    }
+
+    /// Returns the total number of inodes in the filesystem.
+    #[must_use]
+    pub const fn total_inodes(&self) -> u64 {
+        self.total_inodes
+    }
+
+    /// Returns the number of free inodes, including those reserved for
+    /// privileged users.
+    #[must_use]
+    pub const fn free_inodes(&self) -> u64 {
+        self.free_inodes
+    }
+
+    /// Returns the number of inodes available to unprivileged users.
+    #[must_use]
+    pub const fn available_inodes(&self) -> u64 {
+        self.available_inodes
+    }
+
+    /// Returns the number of inodes in use (`total_inodes - free_inodes`).
+    #[must_use]
+    pub const fn used_inodes(&self) -> u64 {
+        self.total_inodes.saturating_sub(self.free_inodes)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_used_bytes(path: &CStr) -> Option<u64> {
+    #[repr(C, packed(4))]
+    struct VolumeSpaceUsed {
+        size: u32,
+        space_used: u64,
+    }
+
+    let mut attributes = libc::attrlist {
+        bitmapcount: libc::ATTR_BIT_MAP_COUNT,
+        reserved: 0,
+        commonattr: 0,
+        volattr: libc::ATTR_VOL_INFO | libc::ATTR_VOL_SPACEUSED,
+        dirattr: 0,
+        fileattr: 0,
+        forkattr: 0,
+    };
+    let mut result = VolumeSpaceUsed {
+        size: 0,
+        space_used: 0,
+    };
+
+    let status = unsafe {
+        // SAFETY: `path` is NUL-terminated, and both pointers refer to valid,
+        // writable values whose sizes match the Darwin `getattrlist` ABI.
+        libc::getattrlist(
+            path.as_ptr(),
+            (&mut attributes as *mut libc::attrlist).cast(),
+            (&mut result as *mut VolumeSpaceUsed).cast(),
+            std::mem::size_of::<VolumeSpaceUsed>(),
+            0,
+        )
+    };
+    if status != 0 || result.size as usize != std::mem::size_of::<VolumeSpaceUsed>() {
+        return None;
+    }
+
+    Some(unsafe {
+        // SAFETY: `getattrlist` populated the complete packed result buffer.
+        std::ptr::addr_of!(result.space_used).read_unaligned()
+    })
+}
+
 /// Returns disk free information for a given path.
 ///
-/// The first tuple element is the total capacity of the filesystem containing
-/// `path`; the second is the bytes **available to a non-superuser** (i.e. the
-/// `f_bavail` field from `statvfs(3)`, *not* `f_bfree`, which can include
-/// blocks reserved for root). On filesystems where this distinction does not
-/// apply (e.g. most non-UNIX mounts), the two values are equal.
-///
 /// # Arguments
-/// * `path` - The filesystem path to query
+/// * `path` - The filesystem path to query.
 ///
-/// # Returns
-/// * `Ok((capacity_bytes, available_bytes))` - A tuple containing the total
-///   capacity and the bytes available to a non-superuser.
-/// * `Err(std::io::Error)` if the system call fails or path is invalid.
+/// # Errors
+/// Returns [`std::io::Error`] if the underlying `statvfs` call fails, a byte
+/// count overflows `u64`, or the path contains an interior NUL byte.
+///
+/// On macOS, used space is read from `ATTR_VOL_SPACEUSED` to match `df` on
+/// APFS volumes. If that attribute is unavailable, it falls back to the
+/// portable `total - free` calculation used on other platforms.
 ///
 /// # Example
 /// ```
-/// let (total, free) = os_utils::disk_free("/").unwrap();
-/// println!("Disk: {} / {} bytes available to non-root", free, total);
-/// if total > 0 {
-///     let pct_used = ((total - free) as f64 / total as f64) * 100.0;
-///     println!("{:.1}% unavailable to non-root", pct_used);
-/// }
+/// let usage = os_utils::disk_free("/").unwrap();
+/// println!(
+///     "Disk free: {} / {} bytes ({:.1}% used)",
+///     usage.available_bytes(),
+///     usage.total_bytes(),
+///     (usage.used_bytes() as f64
+///         / (usage.used_bytes() as f64 + usage.available_bytes() as f64))
+///         * 100.0,
+/// );
 /// ```
-pub fn disk_free<P: AsRef<Path>>(path: P) -> std::io::Result<(u64, u64)> {
+pub fn disk_free<P: AsRef<Path>>(path: P) -> std::io::Result<DiskUsage> {
     let path_cstr = CString::new(path.as_ref().as_os_str().as_encoded_bytes())
         .map_err(|_| std::io::Error::other("Path contains null byte"))?;
 
@@ -678,10 +793,37 @@ pub fn disk_free<P: AsRef<Path>>(path: P) -> std::io::Result<(u64, u64)> {
     };
 
     let total_blocks = stat.f_blocks as u64;
+    let free_blocks = stat.f_bfree as u64;
     let available_blocks = stat.f_bavail as u64;
     let block_size = stat.f_frsize as u64;
+    let total_inodes = stat.f_files as u64;
+    let free_inodes = stat.f_ffree as u64;
+    let available_inodes = stat.f_favail as u64;
+    let blocks_to_bytes = |blocks: u64| {
+        blocks.checked_mul(block_size).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "filesystem capacity exceeds u64",
+            )
+        })
+    };
+    let total_bytes = blocks_to_bytes(total_blocks)?;
+    let free_bytes = blocks_to_bytes(free_blocks)?;
+    let portable_used_bytes = total_bytes.saturating_sub(free_bytes);
+    #[cfg(target_os = "macos")]
+    let used_bytes = macos_used_bytes(&path_cstr).unwrap_or(portable_used_bytes);
+    #[cfg(not(target_os = "macos"))]
+    let used_bytes = portable_used_bytes;
 
-    Ok((total_blocks * block_size, available_blocks * block_size))
+    Ok(DiskUsage {
+        total_bytes,
+        used_bytes,
+        free_bytes,
+        available_bytes: blocks_to_bytes(available_blocks)?,
+        total_inodes,
+        free_inodes,
+        available_inodes,
+    })
 }
 
 /// # Example
@@ -1426,15 +1568,32 @@ mod tests {
 
     #[test]
     fn test_disk_free() {
-        let result = disk_free("/");
-        assert!(result.is_ok(), "Failed to get disk usage for /");
-
-        let (total, free) = result.unwrap();
-        assert!(free > 0, "Total bytes should be greater than 0");
-        assert!(total > 0, "Used bytes should be greater than 0");
+        let usage = disk_free("/").expect("failed to get disk usage for /");
         assert!(
-            free <= total,
-            "Used bytes should be less than or equal to total bytes"
+            usage.total_bytes() > 0,
+            "total bytes should be greater than 0"
+        );
+        assert!(
+            usage.available_bytes() <= usage.free_bytes(),
+            "available bytes should be less than or equal to free bytes"
+        );
+        assert!(
+            usage.free_bytes() <= usage.total_bytes(),
+            "free bytes should be less than or equal to total bytes"
+        );
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(usage.used_bytes() + usage.free_bytes(), usage.total_bytes());
+        assert!(
+            usage.available_inodes() <= usage.free_inodes(),
+            "available inodes should be less than or equal to free inodes"
+        );
+        assert!(
+            usage.free_inodes() <= usage.total_inodes(),
+            "free inodes should be less than or equal to total inodes"
+        );
+        assert_eq!(
+            usage.used_inodes() + usage.free_inodes(),
+            usage.total_inodes()
         );
 
         // Test with current directory
@@ -1490,7 +1649,9 @@ mod tests {
             }
         };
 
-        let (total, avail) = disk_free("/").expect("disk_free(/) failed");
+        let usage = disk_free("/").expect("disk_free(/) failed");
+        let total = usage.total_bytes();
+        let avail = usage.available_bytes();
 
         // Allow up to 1 MiB of drift to absorb allocations between the two samples.
         // On a quiet test machine the drift is usually a few hundred KiB.
@@ -1503,6 +1664,56 @@ mod tests {
              ours avail={avail} df avail={df_avail} diff={avail_diff}\n  \
              (tolerance {TOLERANCE})",
         );
+    }
+
+    /// Cross-check all values exposed by `disk_free` against macOS `df -k`.
+    /// In particular, the Used column comes from `ATTR_VOL_SPACEUSED` rather
+    /// than `f_blocks - f_bfree` on APFS.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_disk_free_matches_df() {
+        use std::process::Command;
+
+        // `df -k` emits: Filesystem 1024-blocks Used Available Capacity
+        // iused ifree %iused Mounted on
+        let output = Command::new("df")
+            .args(["-k", "/"])
+            .output()
+            .expect("failed to spawn df");
+        assert!(output.status.success(), "df -k failed");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let fields: Vec<&str> = stdout
+            .lines()
+            .nth(1)
+            .expect("df produced no data line")
+            .split_whitespace()
+            .collect();
+        assert!(fields.len() >= 7, "unexpected df output: {stdout:?}");
+
+        let parse_kib = |field: &str| {
+            field
+                .parse::<u64>()
+                .expect("df block count is not numeric")
+                .checked_mul(1024)
+                .expect("df byte count exceeds u64")
+        };
+        let df_total = parse_kib(fields[1]);
+        let df_used = parse_kib(fields[2]);
+        let df_available = parse_kib(fields[3]);
+        let df_used_inodes = fields[5].parse::<u64>().expect("invalid df iused value");
+        let df_free_inodes = fields[6].parse::<u64>().expect("invalid df ifree value");
+
+        let usage = disk_free("/").expect("disk_free(/) failed");
+
+        // The samples are taken in separate processes while filesystem usage
+        // remains live. Allow modest drift, but not enough for the APFS
+        // `total - free` fallback to pass accidentally.
+        const BYTE_TOLERANCE: u64 = 16 * 1024 * 1024;
+        assert!(usage.total_bytes().abs_diff(df_total) < BYTE_TOLERANCE);
+        assert!(usage.used_bytes().abs_diff(df_used) < BYTE_TOLERANCE);
+        assert!(usage.available_bytes().abs_diff(df_available) < BYTE_TOLERANCE);
+        assert!(usage.used_inodes().abs_diff(df_used_inodes) < 1024);
+        assert!(usage.free_inodes().abs_diff(df_free_inodes) < 1024);
     }
 
     /// Returns the system boot time in seconds since the Unix epoch, or
